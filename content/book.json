@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "title": "АРМАТУРА / PRO",
+  "modules": [
+    "content/modules/01-module.json",
+    "content/modules/02-module.json",
+    "content/modules/03-module.json",
+    "content/modules/04-module.json",
+    "content/modules/05-module.json",
+    "content/modules/06-module.json",
+    "content/modules/07-module.json",
+    "content/modules/08-module.json",
+    "content/modules/09-module.json",
+    "content/modules/10-module.json",
+    "content/modules/11-module.json",
+    "content/modules/12-module.json",
+    "content/modules/13-module.json",
+    "content/modules/14-module.json",
+    "content/modules/15-module.json",
+    "content/modules/16-module.json"
+  ]
+}

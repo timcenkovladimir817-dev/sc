@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Диагностика доступа — АРМАТУРА / PRO</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+table{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}
+th,td{padding:9px 10px;border-bottom:1px solid #dce4ef;text-align:left;vertical-align:top}
+th{width:240px;font-weight:600;color:#42506b}
+td b{font-family:ui-monospace,Consolas,monospace}
+.ok{color:#16926a;font-weight:600}.bad{color:#c0392b;font-weight:600}
+pre{background:#f4f7fc;border:1px solid #dce4ef;border-radius:9px;padding:14px;overflow:auto;font-size:13px;white-space:pre-wrap}
+code{background:#eef3fb;padding:2px 6px;border-radius:5px;font-size:13px}
+button{padding:9px 16px;border:0;border-radius:9px;background:#315de0;color:#fff;font:inherit;cursor:pointer}
+button.secondary{background:#e9eefa;color:#284aa2}
+</style></head>
+<body><div class="layout solo"><main id="app"><p>Проверяю доступ…</p></main></div>
+<script src="../js/config.js"></script>
+<script src="../js/vendor/supabase.js"></script>
+<script>
+(async () => {
+  const app = document.querySelector('#app');
+  const rows = [];
+  const add = (label, value, state) => rows.push({ label, value, state });
+  const fmt = (v) => v === null || v === undefined ? '—' : String(v);
+
+  let session = null, profile = null;
+
+  try {
+    const r = await sb.auth.getSession();
+    session = r.data.session;
+  } catch (e) {
+    add('Сессия', 'ошибка: ' + e.message, 'bad');
+  }
+
+  if (!session) {
+    add('Сессия', 'нет — вход не выполнен или токен истёк', 'bad');
+  } else {
+    add('Сессия', 'есть', 'ok');
+    add('Email', fmt(session.user.email), '');
+    add('User ID', fmt(session.user.id), '');
+    add('Токен истекает', new Date(session.expires_at * 1000).toLocaleString('ru-RU'), '');
+
+    // Чтение своего профиля без .single(), чтобы видеть 0 строк отдельно от ошибки.
+    const { data, error, status } = await sb.from('profiles')
+      .select('id, full_name, email, role, is_blocked').eq('id', session.user.id);
+    if (error) {
+      add('Профиль', 'ошибка чтения: ' + error.message + ' (HTTP ' + status + ')', 'bad');
+    } else if (!data.length) {
+      add('Профиль', 'строки нет в public.profiles — профиль не создан', 'bad');
+    } else {
+      profile = data[0];
+      add('Профиль', 'найден', 'ok');
+      add('ФИО', fmt(profile.full_name), '');
+      add('Роль', fmt(profile.role), profile.role === 'admin' ? 'ok' : 'bad');
+      add('Блокировка', fmt(profile.is_blocked), profile.is_blocked ? 'bad' : 'ok');
+    }
+
+    // Проверка функций, на которых держатся политики.
+    for (const fn of ['is_admin', 'is_teacher', 'is_active_user']) {
+      const { data: res, error: e } = await sb.rpc(fn);
+      add('Функция ' + fn + '()', e ? 'ошибка: ' + e.message : fmt(res),
+        e ? 'bad' : (res === true ? 'ok' : 'bad'));
+    }
+  }
+
+  // Ключевые таблицы: читаются ли.
+  for (const t of ['courses', 'course_modules', 'module_blocks']) {
+    const { error } = await sb.from(t).select('*').limit(1);
+    add('Чтение ' + t, error ? 'ошибка: ' + error.message : 'доступно', error ? 'bad' : 'ok');
+  }
+
+  // Хранилище.
+  const { data: bucket, error: bErr } = await sb.storage.from('course-images').list('', { limit: 1 });
+  add('Бакет course-images', bErr ? 'ошибка: ' + bErr.message : 'доступен, файлов видно: ' + (bucket ? bucket.length : 0),
+    bErr ? 'bad' : 'ok');
+
+  const verdict = !session ? 'Вход не выполнен.'
+    : !profile ? 'Нет строки профиля — поэтому админка закрыта.'
+    : profile.role !== 'admin' ? 'Роль «' + profile.role + '», а админке нужна «admin».'
+    : profile.is_blocked ? 'Учётная запись заблокирована.'
+    : 'Доступ должен работать. Если админка всё равно закрыта — дело в кэше браузера: Ctrl+F5.';
+
+  app.innerHTML = `
+    <div class="eyebrow">Диагностика</div>
+    <h1>Почему не пускает в админку</h1>
+    <div class="card">
+      <div class="notice ${verdict.startsWith('Доступ') ? 'ok' : 'err'}"><b>Вывод:</b> ${esc(verdict)}</div>
+      <table><tbody>${rows.map((r) => `<tr><th>${esc(r.label)}</th><td><b class="${r.state}">${esc(r.value)}</b></td></tr>`).join('')}</tbody></table>
+      <div class="actions" style="margin-top:18px">
+        <button class="secondary" onclick="location.reload()">Проверить снова</button>
+        <a href="../login.html?next=admin/" style="align-self:center">Войти заново</a>
+        <a href="../index.html" style="align-self:center">← К учебнику</a>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Если роль не «admin»</h2>
+      <p>Выполни в SQL Editor, подставив свой email:</p>
+      <pre>update public.profiles
+set role = 'admin'
+where email = 'твой@email.ru'
+returning id, email, role;</pre>
+      <p>Если строки профиля нет вовсе — сначала создай пользователя приглашением, потом выдай роль.</p>
+      <h2>Если профиль есть, роль admin, а пускает не везде</h2>
+      <p>Проверь, что в хранилище применены политики из миграции <code>0008</code>:
+      бакет <code>course-images</code> и запись только для <code>is_teacher()</code>.</p>
+    </div>`;
+})();
+</script>
+</body></html>

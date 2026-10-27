@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Приглашение сотрудника — АРМАТУРА / PRO</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+.field{margin-bottom:14px}label{display:block;font-weight:600;margin-bottom:5px}
+input,select{width:100%;padding:10px;border:1px solid #bbc9de;border-radius:9px;font:inherit}
+button{padding:11px 18px;border:0;border-radius:9px;background:#315de0;color:#fff;font:inherit;cursor:pointer}
+button.secondary{background:#e9eefa;color:#284aa2}.notice{border-left:4px solid #d5a242;background:#fff7e5;padding:14px 18px;margin:16px 0;font-size:14px}
+.ok{border-left-color:#16926a;background:#eaf7ee}.err{border-left-color:#c0392b;background:#fff0ed}
+table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:10px;border-bottom:1px solid #dce4ef;text-align:left}
+</style></head>
+<body><div class="layout solo"><main id="app"><p>Проверка доступа…</p><p><a href="../index.html">← К учебнику</a></p></main></div>
+<script src="../js/config.js"></script>
+<script src="../js/vendor/supabase.js"></script>
+<script src="../js/supabase-client.js"></script>
+<script>
+(async () => {
+  const admin = await requireAdmin();
+  if (!admin) return;
+  const app = document.querySelector('#app');
+  app.innerHTML = `
+  <div class="eyebrow">Администрирование обучения</div>
+  <h1>Пригласить сотрудника</h1>
+  <div class="card">
+    <form id="invite">
+      <div class="grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div class="field"><label for="fullName">ФИО сотрудника *</label><input id="fullName" required maxlength="120" autocomplete="name"></div>
+        <div class="field"><label for="email">Рабочий email *</label><input id="email" type="email" required maxlength="254" autocomplete="off"></div>
+        <div class="field"><label for="position">Должность</label><input id="position" maxlength="120"></div>
+        <div class="field"><label for="department">Подразделение</label><input id="department" maxlength="120"></div>
+        <div class="field"><label for="mentor">Наставник (email)</label><input id="mentor" type="email" maxlength="254"></div>
+        <div class="field"><label for="supervisor">Руководитель (email)</label><input id="supervisor" type="email" maxlength="254"></div>
+        <div class="field"><label for="dueDate">Срок прохождения</label><input id="dueDate" type="date"></div>
+      </div>
+      <div class="notice">Наставник и руководитель получают задачу в Bitrix24 как наблюдатели. Учётные записи им не создаются. После отправки появится ссылка на прогресс — её можно передать отдельно.</div>
+      <div class="actions"><button type="submit" id="send">Отправить приглашение</button></div>
+      <p id="status" role="status"></p>
+    </form>
+  </div>
+  <div class="card"><h2>Последние приглашения</h2><div id="list">Загрузка…</div></div>`
+  <p><a href="../index.html">← К учебнику</a></p>`;
+  await loadList();
+
+  document.querySelector('#invite').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const status = document.querySelector('#status');
+    const button = document.querySelector('#send');
+    const payload = {
+      fullName: document.querySelector('#fullName').value,
+      email: document.querySelector('#email').value,
+      position: document.querySelector('#position').value,
+      department: document.querySelector('#department').value,
+      mentorEmail: document.querySelector('#mentor').value,
+      supervisorEmail: document.querySelector('#supervisor').value,
+      dueDate: document.querySelector('#dueDate').value || null,
+      courseSlug: 'armatura',
+    };
+    status.textContent = 'Отправляем…'; status.className = 'notice';
+    button.disabled = true;
+    try {
+      const data = await callFunction('invite-user', payload);
+      status.className = 'notice ok';
+      status.innerHTML = `Приглашение отправлено на <b>${esc(payload.email)}</b>.`
+        + (data.bitrixTaskId ? `<br>Задача Bitrix24: <b>${esc(data.bitrixTaskId)}</b>.` : '<br>Задача Bitrix24 не создана.')
+        + `<br>Ссылка на прогресс для наблюдателей: <a href="${esc(data.progressUrl)}" target="_blank" rel="noopener">${esc(data.progressUrl)}</a>`
+        + (data.warnings?.length ? `<br><small>${data.warnings.map(esc).join('<br>')}</small>` : '')
+        + '<br><small>Ссылку на прогресс стоит вставить в задачу или отправить наблюдателям.</small>';
+      event.target.reset();
+      await loadList();
+    } catch (error) {
+      status.className = 'notice err';
+      status.textContent = 'Не отправлено: ' + error.message;
+    } finally { button.disabled = false; }
+  });
+
+  async function loadList() {
+    const { data, error } = await sb.from('invitations')
+      .select('id, email, full_name, status, due_date, created_at, bitrix_task_id, bitrix_error, enrollment_id')
+      .order('created_at', { ascending: false }).limit(20);
+    if (error) { document.querySelector('#list').textContent = error.message; return; }
+    if (!data.length) { document.querySelector('#list').textContent = 'Приглашений пока нет.'; return; }
+    document.querySelector('#list').innerHTML = `<div class="tablewrap"><table><thead><tr><th>Сотрудник</th><th>Email</th><th>Срок</th><th>Статус</th><th>Bitrix</th><th></th></tr></thead><tbody>${data.map((row) => `<tr>
+      <td>${esc(row.full_name)}</td><td>${esc(row.email)}</td><td>${esc(row.due_date ?? '—')}</td>
+      <td>${esc(statusText(row.status))}</td>
+      <td>${row.bitrix_task_id ? '№ ' + esc(row.bitrix_task_id) : (row.bitrix_error ? '<span title="' + esc(row.bitrix_error) + '">ошибка</span>' : '—')}</td>
+      <td>${row.status === 'pending' ? `<button type="button" class="secondary" data-resend="${esc(row.id)}">Отправить повторно</button>` : ''}</td>
+    </tr>`).join('')}</tbody></table></div>`;
+    document.querySelectorAll('[data-resend]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        button.disabled = true; button.textContent = 'Отправляем…';
+        try { await callFunction('resend-invite', { invitationId: button.dataset.resend }); await loadList(); }
+        catch (error) { alert(error.message); button.disabled = false; button.textContent = 'Отправить повторно'; }
+      });
+    });
+  }
+
+  function statusText(value) {
+    return ({ pending: 'ожидает входа', accepted: 'принято', revoked: 'отозвано' })[value] ?? value;
+  }
+})();
+</script></body></html>

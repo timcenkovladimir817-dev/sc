@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Схемы в хранилище — АРМАТУРА / PRO</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+.log{font-family:ui-monospace,Consolas,monospace;font-size:13px;white-space:pre-wrap;background:#f4f7fc;border:1px solid #dce4ef;border-radius:9px;padding:14px;margin-top:16px;max-height:340px;overflow:auto}
+.log b{color:#16926a}.log i{color:#c0392b}
+button{padding:11px 18px;border:0;border-radius:9px;background:#315de0;color:#fff;font:inherit;cursor:pointer}
+button:disabled{opacity:.55;cursor:default}
+</style></head>
+<body><div class="layout solo"><main id="app"><p>Проверка доступа…</p></main></div>
+<script src="../js/config.js"></script>
+<script src="../js/vendor/supabase.js"></script>
+<script src="../js/supabase-client.js"></script>
+<script>
+(async () => {
+  const admin = await requireAdmin();
+  if (!admin) return;
+  document.querySelector('#app').innerHTML = `
+    <div class="eyebrow">Администрирование обучения</div>
+    <h1>Схемы из репозитория — в хранилище</h1>
+    <div class="card">
+      <p>Загружает <code>graphics/*.svg</code> в бакет <code>course-images</code> и создаёт
+      блоки-картинки в главах, где схема была привязана полем <code>graphic</code>.</p>
+      <div class="notice">Файлы в репозитории остаются на месте. Повторный запуск безопасен:
+      файлы перезаписываются, дубли блоков не создаются.</div>
+      <div class="actions"><button id="run">Начать перенос</button></div>
+      <div class="log" id="log">Готов к запуску.</div>
+      <p><a href="../index.html">← К учебнику</a></p>
+    </div>`;
+
+  const out = document.querySelector('#log');
+  const say = (text, kind) => {
+    const line = document.createElement('div');
+    if (kind) line.innerHTML = `<${kind}>${esc(text)}</${kind}>`;
+    else line.textContent = text;
+    out.append(line);
+    out.scrollTop = out.scrollHeight;
+  };
+
+  document.querySelector('#run').addEventListener('click', async (event) => {
+    const btn = event.currentTarget;
+    btn.disabled = true;
+    out.textContent = '';
+    try {
+      const base = new URL('../', location.href);
+      const manifest = await fetch(new URL('content/book.json', base), { cache: 'no-store' }).then((r) => r.json());
+      const files = await Promise.all(manifest.modules.map((p, i) =>
+        fetch(new URL(p, base), { cache: 'no-store' })
+          .then((r) => { if (!r.ok) throw new Error(p + ': HTTP ' + r.status); return r.json(); })
+          .then((m) => ({ m, i }))));
+
+      const graphics = new Map();
+      for (const { m, i } of files) if (m.graphic) graphics.set(String(i + 1).padStart(2, '0'), m.graphic);
+      say('глав со схемой: ' + graphics.size);
+
+      // 1. Файлы в хранилище.
+      for (const path of new Set(graphics.values())) {
+        const name = path.split('/').pop();
+        const blob = await fetch(new URL(path, base)).then((r) => {
+          if (!r.ok) throw new Error(path + ': HTTP ' + r.status);
+          return r.blob();
+        });
+        const up = await sb.storage.from('course-images').upload(name, blob, {
+          contentType: 'image/svg+xml', upsert: true,
+        });
+        if (up.error) say('файл не загружен: ' + name + ' — ' + up.error.message, 'i');
+        else say('загружено: ' + name);
+      }
+
+      // 2. Блоки-картинки в главах.
+      const { data: mods, error: modErr } = await sb.from('course_modules').select('id, slug');
+      if (modErr) throw new Error('course_modules: ' + modErr.message);
+      const bySlug = new Map(mods.map((r) => [r.slug, r.id]));
+
+      const { data: cards, error: cardErr } = await sb.from('module_blocks')
+        .select('id, module_id, payload').eq('kind', 'image');
+      if (cardErr) throw new Error('module_blocks: ' + cardErr.message);
+
+      let created = 0, skipped = 0;
+      for (const [slug, path] of graphics) {
+        const moduleId = bySlug.get(slug);
+        if (!moduleId) { say('в базе нет модуля ' + slug, 'i'); continue; }
+
+        const name = path.split('/').pop();
+        const url = sb.storage.from('course-images').getPublicUrl(name).data.publicUrl;
+
+        const { data: sections } = await sb.from('module_blocks')
+          .select('position').eq('module_id', moduleId).eq('kind', 'section')
+          .order('position', { ascending: false }).limit(1);
+        const nextPos = sections && sections.length ? sections[0].position + 1 : 0;
+
+        const already = (cards || []).some((c) =>
+          c.module_id === moduleId && c.payload && c.payload.url && c.payload.url.endsWith(name));
+        if (already) { say('уже есть: глава ' + slug + ' — ' + name); skipped++; continue; }
+
+        const { error } = await sb.from('module_blocks').insert({
+          module_id: moduleId,
+          kind: 'image',
+          position: nextPos,
+          status: 'published',
+          payload: { url, caption: 'Учебная схема' },
+        });
+        if (error) say('блок не создан: глава ' + slug + ' — ' + error.message, 'i');
+        else { say('создан блок: глава ' + slug + ' — ' + name); created++; }
+      }
+
+      say('блоков создано: ' + created + ', пропущено: ' + skipped, 'b');
+      const check = await sb.rpc('published_book');
+      if (check.error) throw new Error('проверка: ' + check.error.message);
+      const withImg = check.data.filter((m) => (m.images || []).length).length;
+      say('глав с картинками в базе: ' + withImg, 'b');
+      say('ГОТОВО. Открой учебник и обнови с Ctrl+F5.', 'b');
+    } catch (error) {
+      say('ОШИБКА: ' + error.message, 'i');
+    } finally { btn.disabled = false; }
+  });
+})();
+</script>
+</body></html>

@@ -5,13 +5,13 @@ modules.forEach((m,i)=>{if(m.origin===undefined)m.origin=i});
 let editorIndex=0, editorDirty=false;
 const contentKey='armatura.editor.project.v5.'+hashBook(JSON.stringify(modules));
 function hashBook(s){let h=2166136261;for(let i=0;i<s.length;i++)h=Math.imul(h^s.charCodeAt(i),16777619);return (h>>>0).toString(16)}
-function cleanModule(m){return {title:escapeHTML(m.title),hours:m.hours,goal:escapeHTML(m.goal),sections:m.sections.map(s=>s.map(escapeHTML)),table:m.table.map(r=>r.map(escapeHTML)),task:escapeHTML(m.task),answer:escapeHTML(m.answer),checks:m.checks.map(escapeHTML)}}
+function cleanModule(m){return {title:escapeHTML(m.title),hours:m.hours,goal:escapeHTML(m.goal),sections:m.sections.map(s=>[escapeHTML(s[0]),escapeHTML(s[1]),(s[2]||[]).map(x=>[escapeHTML(x[0]),escapeHTML(x[1])])]),images:(m.images||[]).map(x=>[escapeHTML(x[0]),escapeHTML(x[1])]),table:m.table.map(r=>r.map(escapeHTML)),task:escapeHTML(m.task),answer:escapeHTML(m.answer),checks:m.checks.map(escapeHTML)}}
 function validateBook(data){
  if(!data||data.format!=='armatura-book-v4'||!Array.isArray(data.modules)||!data.modules.length||data.modules.length>300)throw Error('Неверный формат книги или число модулей (1–300).');
  for(const m of data.modules){
  for(const k of ['title','goal','task','answer'])if(typeof m[k]!=='string')throw Error('В модуле отсутствует текстовое поле '+k);
  if(!m.title.trim()||!Number.isFinite(m.hours)||m.hours<0||m.hours>10000)throw Error('Проверьте название и часы.');
- if(!Array.isArray(m.sections)||!m.sections.length||m.sections.length>500||m.sections.some(s=>!Array.isArray(s)||s.length!==2||s.some(x=>typeof x!=='string')))throw Error('Неверные разделы.');
+ if(!Array.isArray(m.sections)||!m.sections.length||m.sections.length>500||m.sections.some(s=>!Array.isArray(s)||s.length<2||s.length>3||typeof s[0]!=='string'||typeof s[1]!=='string'))throw Error('Неверные разделы.');
  if(!Array.isArray(m.table)||!m.table.length||m.table.some(r=>!Array.isArray(r)||!r.length||r.some(x=>typeof x!=='string')))throw Error('Неверная таблица.');
  if(!Array.isArray(m.checks)||m.checks.some(x=>typeof x!=='string'))throw Error('Неверные вопросы.');
  if(m.origin!==undefined&&(!Number.isInteger(m.origin)||m.origin<0||m.origin>15))throw Error('Неверный идентификатор источников.');

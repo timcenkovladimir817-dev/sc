@@ -5,105 +5,217 @@
 <style>
 table{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}
 th,td{padding:9px 10px;border-bottom:1px solid #dce4ef;text-align:left;vertical-align:top}
-th{width:240px;font-weight:600;color:#42506b}
-td b{font-family:ui-monospace,Consolas,monospace}
-.ok{color:#16926a;font-weight:600}.bad{color:#c0392b;font-weight:600}
+th{width:250px;font-weight:600;color:#42506b}
+td b{font-family:ui-monospace,Consolas,monospace;word-break:break-all}
+.ok{color:#16926a;font-weight:600}.bad{color:#c0392b;font-weight:600}.warn{color:#b3801a;font-weight:600}
 pre{background:#f4f7fc;border:1px solid #dce4ef;border-radius:9px;padding:14px;overflow:auto;font-size:13px;white-space:pre-wrap}
 code{background:#eef3fb;padding:2px 6px;border-radius:5px;font-size:13px}
 button{padding:9px 16px;border:0;border-radius:9px;background:#315de0;color:#fff;font:inherit;cursor:pointer}
 button.secondary{background:#e9eefa;color:#284aa2}
+.step{font-size:13px;color:#5b6b86;margin-top:10px}
 </style></head>
-<body><div class="layout solo"><main id="app"><p>Проверяю доступ…</p></main></div>
+<body><div class="layout solo"><main id="app">
+  <div class="eyebrow">Диагностика</div>
+  <h1>Почему не пускает в админку</h1>
+  <div class="card"><table><tbody id="rows"></tbody></table>
+    <div class="step" id="step">Начинаю…</div>
+    <div class="actions" style="margin-top:18px">
+      <button class="secondary" onclick="location.reload()">Проверить снова</button>
+      <a href="../login.html?next=admin/" style="align-self:center">Войти заново</a>
+      <a href="../index.html" style="align-self:center">← К учебнику</a>
+    </div>
+  </div>
+  <div id="extra"></div>
+</main></div>
 <script src="../js/config.js"></script>
 <script src="../js/vendor/supabase.js"></script>
+<script src="../js/supabase-client.js"></script>
 <script>
-(async () => {
-  const app = document.querySelector('#app');
-  const rows = [];
-  const add = (label, value, state) => rows.push({ label, value, state });
-  const fmt = (v) => v === null || v === undefined ? '—' : String(v);
+(() => {
+  'use strict';
+  const body = document.querySelector('#rows');
+  const stepEl = document.querySelector('#step');
+  const extra = document.querySelector('#extra');
+  const say = (t) => { stepEl.textContent = t; };
 
-  let session = null, profile = null;
-
-  try {
-    const r = await sb.auth.getSession();
-    session = r.data.session;
-  } catch (e) {
-    add('Сессия', 'ошибка: ' + e.message, 'bad');
+  function row(label, value, state) {
+    const tr = document.createElement('tr');
+    const th = document.createElement('th');
+    th.textContent = label;
+    const td = document.createElement('td');
+    const b = document.createElement('b');
+    b.className = state || '';
+    b.textContent = value === null || value === undefined ? '—' : String(value);
+    td.append(b);
+    tr.append(th, td);
+    body.append(tr);
   }
 
-  if (!session) {
-    add('Сессия', 'нет — вход не выполнен или токен истёк', 'bad');
-  } else {
-    add('Сессия', 'есть', 'ok');
-    add('Email', fmt(session.user.email), '');
-    add('User ID', fmt(session.user.id), '');
-    add('Токен истекает', new Date(session.expires_at * 1000).toLocaleString('ru-RU'), '');
+  const timeout = (p, ms, label) => Promise.race([
+    p,
+    new Promise((_, rej) => setTimeout(() => rej(new Error('нет ответа за ' + ms + ' мс — ' + label)), ms)),
+  ]);
 
-    // Чтение своего профиля без .single(), чтобы видеть 0 строк отдельно от ошибки.
-    const { data, error, status } = await sb.from('profiles')
-      .select('id, full_name, email, role, is_blocked').eq('id', session.user.id);
-    if (error) {
-      add('Профиль', 'ошибка чтения: ' + error.message + ' (HTTP ' + status + ')', 'bad');
-    } else if (!data.length) {
-      add('Профиль', 'строки нет в public.profiles — профиль не создан', 'bad');
-    } else {
-      profile = data[0];
-      add('Профиль', 'найден', 'ok');
-      add('ФИО', fmt(profile.full_name), '');
-      add('Роль', fmt(profile.role), profile.role === 'admin' ? 'ok' : 'bad');
-      add('Блокировка', fmt(profile.is_blocked), profile.is_blocked ? 'bad' : 'ok');
+  // Токен из localStorage: работает, даже если клиент Supabase завис.
+  function storedToken() {
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!/-auth-token$/.test(key)) continue;
+        const value = JSON.parse(localStorage.getItem(key));
+        const token = value && (value.access_token || (value.currentSession && value.currentSession.access_token));
+        if (token) return { key, token };
+      }
+    } catch (e) { /* мусор в хранилище — не наша проблема */ }
+    return null;
+  }
+
+  function jwtPayload(token) {
+    try {
+      const part = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      const json = decodeURIComponent(atob(part).split('').map((c) =>
+        '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
+      return JSON.parse(json);
+    } catch (e) { return null; }
+  }
+
+  async function rest(path, token) {
+    const cfg = window.APP_CONFIG || {};
+    const res = await timeout(fetch(cfg.supabaseUrl + '/rest/v1/' + path, {
+      headers: { apikey: cfg.supabaseAnonKey, Authorization: 'Bearer ' + token },
+    }), 8000, 'REST ' + path);
+    const text = await res.text();
+    let data = null;
+    try { data = JSON.parse(text); } catch (e) { data = text; }
+    return { status: res.status, data };
+  }
+
+  (async () => {
+    let token = null;
+    let userId = null;
+
+    // 1. Клиент Supabase
+    say('Проверяю клиент Supabase…');
+    if (!window.sb) { row('Клиент Supabase', 'не создан — ошибка в js/config.js', 'bad'); return; }
+    row('Клиент Supabase', 'создан', 'ok');
+
+    // 2. Сессия через клиент (с таймаутом — он может зависнуть)
+    say('Запрашиваю сессию…');
+    try {
+      const res = await timeout(sb.auth.getSession(), 6000, 'getSession');
+      const session = res && res.data && res.data.session;
+      if (session) {
+        row('Сессия (клиент)', 'есть', 'ok');
+        row('Email', session.user.email, '');
+        row('User ID', session.user.id, '');
+        token = session.access_token;
+        userId = session.user.id;
+      } else {
+        row('Сессия (клиент)', 'нет — вход не выполнен', 'bad');
+      }
+    } catch (e) {
+      row('Сессия (клиент)', 'ЗАВИСЛА: ' + e.message, 'bad');
     }
 
-    // Проверка функций, на которых держатся политики.
+    // 3. Резервное чтение токена из localStorage
+    if (!token) {
+      say('Читаю токен из localStorage…');
+      const stored = storedToken();
+      if (stored) {
+        const p = jwtPayload(stored.token);
+        token = stored.token;
+        userId = p && p.sub;
+        row('Сессия (localStorage)', 'токен найден', 'warn');
+        row('Ключ хранилища', stored.key, '');
+        if (p) {
+          row('Email из токена', p.email, '');
+          row('User ID из токена', p.sub, '');
+          row('Токен действует до', new Date(p.exp * 1000).toLocaleString('ru-RU'),
+            p.exp * 1000 < Date.now() ? 'bad' : 'ok');
+        }
+      } else {
+        row('Сессия (localStorage)', 'токена нет — вход не выполнен', 'bad');
+      }
+    }
+
+    if (!token || !userId) {
+      say('Готово: без входа дальше проверять нечего.');
+      return;
+    }
+
+    // 4. Профиль напрямую через REST — не зависит от клиента
+    say('Читаю профиль через REST…');
+    try {
+      const r = await rest('profiles?id=eq.' + encodeURIComponent(userId) + '&select=id,email,role,is_blocked,full_name', token);
+      if (r.status !== 200) {
+        row('Профиль (REST)', 'HTTP ' + r.status + ': ' + JSON.stringify(r.data).slice(0, 300), 'bad');
+      } else if (!Array.isArray(r.data) || !r.data.length) {
+        row('Профиль (REST)', '0 строк — политика profiles_select не отдаёт строку или профиля нет', 'bad');
+      } else {
+        const p = r.data[0];
+        row('Профиль (REST)', 'найден', 'ok');
+        row('ФИО', p.full_name, '');
+        row('Роль', p.role, p.role === 'admin' ? 'ok' : 'bad');
+        row('Блокировка', p.is_blocked, p.is_blocked ? 'bad' : 'ok');
+        if (p.role !== 'admin') {
+          row('Вердикт', 'админке нужна роль admin, а стоит «' + p.role + '»', 'bad');
+        } else if (p.is_blocked) {
+          row('Вердикт', 'учётная запись заблокирована', 'bad');
+        } else {
+          row('Вердикт', 'доступ должен работать; если нет — Ctrl+F5 и войти заново', 'ok');
+        }
+      }
+    } catch (e) {
+      row('Профиль (REST)', 'ошибка: ' + e.message, 'bad');
+    }
+
+    // 5. Функции политик
+    say('Проверяю функции политик…');
     for (const fn of ['is_admin', 'is_teacher', 'is_active_user']) {
-      const { data: res, error: e } = await sb.rpc(fn);
-      add('Функция ' + fn + '()', e ? 'ошибка: ' + e.message : fmt(res),
-        e ? 'bad' : (res === true ? 'ok' : 'bad'));
+      try {
+        const r = await rest('rpc/' + fn, token);
+        const value = r.status === 200 ? JSON.stringify(r.data) : 'HTTP ' + r.status + ': ' + JSON.stringify(r.data).slice(0, 200);
+        row('Функция ' + fn + '()', value, r.status === 200 && r.data === true ? 'ok' : 'bad');
+      } catch (e) {
+        row('Функция ' + fn + '()', 'ошибка: ' + e.message, 'bad');
+      }
     }
-  }
 
-  // Ключевые таблицы: читаются ли.
-  for (const t of ['courses', 'course_modules', 'module_blocks']) {
-    const { error } = await sb.from(t).select('*').limit(1);
-    add('Чтение ' + t, error ? 'ошибка: ' + error.message : 'доступно', error ? 'bad' : 'ok');
-  }
+    // 6. Таблицы
+    say('Проверяю таблицы…');
+    for (const t of ['courses', 'course_modules', 'module_blocks']) {
+      try {
+        const r = await rest(t + '?select=*&limit=1', token);
+        const n = Array.isArray(r.data) ? r.data.length : 0;
+        row('Чтение ' + t, r.status === 200 ? 'доступно, строк: ' + n : 'HTTP ' + r.status + ': ' + JSON.stringify(r.data).slice(0, 200),
+          r.status === 200 ? 'ok' : 'bad');
+      } catch (e) {
+        row('Чтение ' + t, 'ошибка: ' + e.message, 'bad');
+      }
+    }
 
-  // Хранилище.
-  const { data: bucket, error: bErr } = await sb.storage.from('course-images').list('', { limit: 1 });
-  add('Бакет course-images', bErr ? 'ошибка: ' + bErr.message : 'доступен, файлов видно: ' + (bucket ? bucket.length : 0),
-    bErr ? 'bad' : 'ok');
+    // 7. Хранилище
+    say('Проверяю хранилище…');
+    try {
+      const r = await rest('../../storage/v1/object/list/course-images', token);
+      row('Бакет course-images', r.status === 200 ? 'доступен' : 'HTTP ' + r.status + ': ' + JSON.stringify(r.data).slice(0, 200),
+        r.status === 200 ? 'ok' : 'bad');
+    } catch (e) {
+      row('Бакет course-images', 'ошибка: ' + e.message, 'bad');
+    }
 
-  const verdict = !session ? 'Вход не выполнен.'
-    : !profile ? 'Нет строки профиля — поэтому админка закрыта.'
-    : profile.role !== 'admin' ? 'Роль «' + profile.role + '», а админке нужна «admin».'
-    : profile.is_blocked ? 'Учётная запись заблокирована.'
-    : 'Доступ должен работать. Если админка всё равно закрыта — дело в кэше браузера: Ctrl+F5.';
+    say('Готово.');
+  })().catch((e) => {
+    row('СБОЙ СТРАНИЦЫ', e && e.message ? e.message : String(e), 'bad');
+    say('Скрипт остановился на ошибке — она выше.');
+  });
 
-  app.innerHTML = `
-    <div class="eyebrow">Диагностика</div>
-    <h1>Почему не пускает в админку</h1>
-    <div class="card">
-      <div class="notice ${verdict.startsWith('Доступ') ? 'ok' : 'err'}"><b>Вывод:</b> ${esc(verdict)}</div>
-      <table><tbody>${rows.map((r) => `<tr><th>${esc(r.label)}</th><td><b class="${r.state}">${esc(r.value)}</b></td></tr>`).join('')}</tbody></table>
-      <div class="actions" style="margin-top:18px">
-        <button class="secondary" onclick="location.reload()">Проверить снова</button>
-        <a href="../login.html?next=admin/" style="align-self:center">Войти заново</a>
-        <a href="../index.html" style="align-self:center">← К учебнику</a>
-      </div>
-    </div>
-    <div class="card">
-      <h2>Если роль не «admin»</h2>
-      <p>Выполни в SQL Editor, подставив свой email:</p>
-      <pre>update public.profiles
-set role = 'admin'
+  extra.innerHTML = `<div class="card"><h2>Если роль не admin</h2>
+    <p>SQL Editor, подставь свой email:</p>
+    <pre>update public.profiles set role = 'admin'
 where email = 'твой@email.ru'
 returning id, email, role;</pre>
-      <p>Если строки профиля нет вовсе — сначала создай пользователя приглашением, потом выдай роль.</p>
-      <h2>Если профиль есть, роль admin, а пускает не везде</h2>
-      <p>Проверь, что в хранилище применены политики из миграции <code>0008</code>:
-      бакет <code>course-images</code> и запись только для <code>is_teacher()</code>.</p>
-    </div>`;
+    <p>Если профиль есть, роль admin, а админка закрыта — открой её с Ctrl+F5: старый токен мог остаться в браузере.</p></div>`;
 })();
 </script>
 </body></html>

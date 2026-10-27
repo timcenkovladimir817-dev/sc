@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Иллюстрации глав — АРМАТУРА / PRO</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+.field{margin-bottom:14px}label{display:block;font-weight:600;margin-bottom:5px}
+select,input[type=text]{width:100%;padding:10px;border:1px solid #bbc9de;border-radius:9px;font:inherit;background:#fff}
+button{padding:11px 18px;border:0;border-radius:9px;background:#315de0;color:#fff;font:inherit;cursor:pointer}
+button.secondary{background:#e9eefa;color:#284aa2}
+button.danger{background:#c0392b}
+button:disabled{opacity:.55;cursor:default}
+.drop{border:2px dashed #bbc9de;border-radius:12px;padding:26px;text-align:center;color:#5b6b86;cursor:pointer;transition:.15s}
+.drop.hot{border-color:#315de0;background:#f2f6ff}
+.thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:16px;margin-top:18px}
+.thumb{border:1px solid #dce4ef;border-radius:12px;overflow:hidden;background:#fff}
+.thumb img{width:100%;height:130px;object-fit:contain;background:#f4f7fc;display:block}
+.thumb .meta{padding:10px 12px;font-size:13px;line-height:1.45}
+.thumb .meta b{display:block;margin-bottom:4px}
+.thumb .meta .cap{color:#5b6b86;word-break:break-word}
+.thumb .meta .sec{color:#284aa2;font-size:12px;margin-top:6px}
+.thumb .act{padding:0 12px 12px}
+.thumb .act button{padding:7px 12px;font-size:13px}
+#status{min-height:22px}
+</style></head>
+<body><div class="layout solo"><main id="app"><p>Проверка доступа…</p></main></div>
+<script src="../js/config.js"></script>
+<script src="../js/vendor/supabase.js"></script>
+<script src="../js/supabase-client.js"></script>
+<script>
+(async () => {
+  const app = document.querySelector('#app');
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { location.replace('../login.html?next=admin/'); return; }
+  const { data: profile, error: pErr } = await sb.from('profiles')
+    .select('id, full_name, role, is_blocked').eq('id', session.user.id).single();
+  if (pErr || !profile || !['admin', 'teacher'].includes(profile.role) || profile.is_blocked) {
+    app.innerHTML = '<div class="card"><h2>Доступ закрыт</h2><p>Раздел доступен преподавателю и администратору.</p>'
+      + '<p><a href="../index.html">Вернуться на главную</a></p></div>';
+    return;
+  }
+
+  app.innerHTML = `
+    <div class="eyebrow">Иллюстрации</div>
+    <h1>Картинки в главах</h1>
+    <div class="card">
+      <div class="field"><label for="mod">Глава</label><select id="mod"><option>Загрузка…</option></select></div>
+
+      <div class="field"><label for="sec">Куда поставить</label><select id="sec"></select></div>
+
+      <div class="field"><label for="cap">Подпись</label>
+        <input id="cap" type="text" maxlength="200" placeholder="Например: Схема предохранительного клапана"></div>
+
+      <div class="drop" id="drop">
+        <b>Выберите файл или перетащите сюда</b><br>
+        <small>PNG, JPEG, WebP, SVG — до 5 МБ</small>
+        <input id="file" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden>
+      </div>
+
+      <div class="actions" style="margin-top:16px">
+        <button id="add" disabled>Загрузить и добавить</button>
+        <a href="../index.html" style="align-self:center">← К учебнику</a>
+      </div>
+      <p id="status" role="status"></p>
+    </div>
+
+    <div class="card">
+      <h2>Иллюстрации этой главы</h2>
+      <div id="list" class="thumbs"><p>Выберите главу.</p></div>
+    </div>`;
+
+  const $ = (s) => document.querySelector(s);
+  const status = (text, kind) => {
+    const el = $('#status');
+    el.textContent = text || '';
+    el.className = kind === 'err' ? 'notice err' : kind === 'ok' ? 'notice ok' : 'notice';
+    el.style.display = text ? '' : 'none';
+  };
+  status('');
+
+  // Главы
+  const { data: mods, error: mErr } = await sb.from('course_modules')
+    .select('id, slug, title, position').order('position');
+  if (mErr) { status('Не удалось загрузить главы: ' + mErr.message, 'err'); return; }
+  $('#mod').innerHTML = mods.map((m) =>
+    `<option value="${esc(m.id)}">${esc(m.position)}. ${esc(m.title)}</option>`).join('');
+
+  let sections = [];
+
+  async function loadModule() {
+    const moduleId = $('#mod').value;
+    status('');
+    const { data: blocks, error } = await sb.from('module_blocks')
+      .select('id, kind, position, payload, status')
+      .eq('module_id', moduleId)
+      .in('kind', ['section', 'image'])
+      .order('kind').order('position');
+    if (error) { status('Блоки не загружены: ' + error.message, 'err'); return; }
+
+    sections = (blocks || []).filter((b) => b.kind === 'section');
+    const images = (blocks || []).filter((b) => b.kind === 'image');
+
+    $('#sec').innerHTML = '<option value="">В конец главы</option>'
+      + sections.map((s) => `<option value="${s.position}">${s.position + 1}. ${esc(s.payload.heading || 'Без названия')}</option>`).join('');
+
+    $('#list').innerHTML = images.length ? images.map((b) => `
+      <div class="thumb">
+        <img src="${esc(b.payload.url)}" alt="${esc(b.payload.caption || '')}" loading="lazy">
+        <div class="meta">
+          <b>${esc(b.payload.caption || 'Без подписи')}</b>
+          <div class="sec">${b.payload.section === null || b.payload.section === undefined
+            ? 'В конце главы'
+            : 'После раздела ' + (Number(b.payload.section) + 1)}</div>
+          <div class="cap">${b.status === 'published' ? 'опубликовано' : 'черновик'}</div>
+        </div>
+        <div class="act"><button class="danger" data-del="${esc(b.id)}">Удалить</button></div>
+      </div>`).join('') : '<p>В этой главе пока нет иллюстраций.</p>';
+
+    document.querySelectorAll('[data-del]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Удалить иллюстрацию из главы? Файл останется в хранилище.')) return;
+        btn.disabled = true;
+        const { error: dErr } = await sb.from('module_blocks').delete().eq('id', btn.dataset.del);
+        if (dErr) { status('Не удалено: ' + dErr.message, 'err'); btn.disabled = false; return; }
+        status('Иллюстрация удалена.', 'ok');
+        await loadModule();
+      });
+    });
+  }
+
+  // Выбор файла
+  const drop = $('#drop');
+  const fileInput = $('#file');
+  let picked = null;
+  const takeFile = (file) => {
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { status('Файл больше 5 МБ.', 'err'); return; }
+    picked = file;
+    drop.innerHTML = `<b>${esc(file.name)}</b><br><small>${(file.size / 1024).toFixed(0)} КБ — готов к загрузке</small>`;
+    $('#add').disabled = false;
+    if (!$('#cap').value) {
+      $('#cap').value = file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim();
+    }
+    status('');
+  };
+  drop.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => takeFile(fileInput.files[0]));
+  ['dragenter', 'dragover'].forEach((e) => drop.addEventListener(e, (ev) => { ev.preventDefault(); drop.classList.add('hot'); }));
+  ['dragleave', 'drop'].forEach((e) => drop.addEventListener(e, (ev) => { ev.preventDefault(); drop.classList.remove('hot'); }));
+  drop.addEventListener('drop', (ev) => takeFile(ev.dataTransfer.files[0]));
+
+  // Загрузка
+  $('#add').addEventListener('click', async (event) => {
+    const btn = event.currentTarget;
+    if (!picked) return;
+    btn.disabled = true;
+    status('Загружаем файл…');
+    try {
+      const moduleId = $('#mod').value;
+      const moduleSlug = mods.find((m) => m.id === moduleId).slug;
+      const ext = (picked.name.match(/\.[A-Za-z0-9]+$/) || ['.png'])[0].toLowerCase();
+      const path = `${moduleSlug}/${Date.now()}${ext}`;
+
+      const { error: upErr } = await sb.storage.from('course-images')
+        .upload(path, picked, { contentType: picked.type, upsert: false });
+      if (upErr) throw new Error('файл не загружен: ' + upErr.message);
+
+      const url = sb.storage.from('course-images').getPublicUrl(path).data.publicUrl;
+
+      const { data: imgs } = await sb.from('module_blocks')
+        .select('position').eq('module_id', moduleId).eq('kind', 'image')
+        .order('position', { ascending: false }).limit(1);
+      const position = imgs && imgs.length ? imgs[0].position + 1 : 0;
+
+      const sectionValue = $('#sec').value;
+      const payload = {
+        url,
+        caption: $('#cap').value.trim() || 'Иллюстрация',
+        section: sectionValue === '' ? null : Number(sectionValue),
+      };
+
+      const { error: insErr } = await sb.from('module_blocks')
+        .insert({ module_id: moduleId, kind: 'image', position, payload, status: 'published' });
+      if (insErr) throw new Error('блок не создан: ' + insErr.message);
+
+      status('Готово. Картинка добавлена в главу.', 'ok');
+      picked = null;
+      fileInput.value = '';
+      $('#cap').value = '';
+      drop.innerHTML = '<b>Выберите файл или перетащите сюда</b><br><small>PNG, JPEG, WebP, SVG — до 5 МБ</small>';
+      await loadModule();
+    } catch (error) {
+      status('ОШИБКА: ' + error.message, 'err');
+    } finally { btn.disabled = !picked; }
+  });
+
+  $('#mod').addEventListener('change', () => {
+    $('#add').disabled = !picked;
+    loadModule();
+  });
+
+  await loadModule();
+})();
+</script>
+</body></html>

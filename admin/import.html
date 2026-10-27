@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Перенос глав в базу — АРМАТУРА / PRO</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+.log{font-family:ui-monospace,Consolas,monospace;font-size:13px;white-space:pre-wrap;background:#f4f7fc;border:1px solid #dce4ef;border-radius:9px;padding:14px;margin-top:16px;max-height:340px;overflow:auto}
+.log b{color:#16926a}.log i{color:#c0392b}
+button{padding:11px 18px;border:0;border-radius:9px;background:#315de0;color:#fff;font:inherit;cursor:pointer}
+button:disabled{opacity:.55;cursor:default}
+</style></head>
+<body><div class="layout solo"><main id="app"><p>Проверка доступа…</p></main></div>
+<script src="../js/config.js"></script>
+<script src="../js/vendor/supabase.js"></script>
+<script src="../js/supabase-client.js"></script>
+<script>
+(async () => {
+  const admin = await requireAdmin();
+  if (!admin) return;
+  document.querySelector('#app').innerHTML = `
+    <div class="eyebrow">Администрирование обучения</div>
+    <h1>Перенести главы из JSON в базу</h1>
+    <div class="card">
+      <p>Читает 16 файлов <code>content/modules/*.json</code>, режет каждую главу на блоки
+      (разделы, строки таблиц, задание, разбор, вопросы, ссылки) и записывает их в
+      <code>module_blocks</code> со статусом «опубликовано».</p>
+      <div class="notice">Повторный запуск безопасен: старые блоки этой книги удаляются и записываются заново.
+      Правки, сделанные в базе вручную, будут потеряны. Ответы читателей не затрагиваются.</div>
+      <div class="actions"><button id="run">Начать перенос</button></div>
+      <div class="log" id="log">Готов к запуску.</div>
+      <p><a href="../index.html">← К учебнику</a></p>
+    </div>`;
+
+  const out = document.querySelector('#log');
+  const say = (text, kind) => {
+    const line = document.createElement('div');
+    if (kind) line.innerHTML = `<${kind}>${esc(text)}</${kind}>`;
+    else line.textContent = text;
+    out.append(line);
+    out.scrollTop = out.scrollHeight;
+  };
+
+  document.querySelector('#run').addEventListener('click', async (event) => {
+    const btn = event.currentTarget;
+    btn.disabled = true;
+    out.textContent = '';
+    try {
+      const base = new URL('../', location.href);
+      const get = async (p) => {
+        const r = await fetch(new URL(p, base), { cache: 'no-store' });
+        if (!r.ok) throw new Error(p + ': HTTP ' + r.status);
+        return r.json();
+      };
+
+      const manifest = await get('content/book.json');
+      say('файлов в книге: ' + manifest.modules.length);
+      const files = await Promise.all(manifest.modules.map((p, i) => get(p).then((m) => ({ m, i }))));
+
+      const { data: mods, error } = await sb.from('course_modules').select('id, slug');
+      if (error) throw new Error('course_modules: ' + error.message);
+      const bySlug = new Map(mods.map((r) => [r.slug, r.id]));
+      say('модулей в базе: ' + mods.length);
+
+      const rows = [];
+      for (const { m, i } of files) {
+        const slug = String(i + 1).padStart(2, '0');
+        const id = bySlug.get(slug);
+        if (!id) { say('пропуск: в базе нет модуля ' + slug, 'i'); continue; }
+        const add = (kind, position, payload) =>
+          rows.push({ module_id: id, kind, position, payload, status: 'published' });
+        add('meta', 0, { title: m.title, hours: m.hours, goal: m.goal });
+        m.sections.forEach((s, j) => add('section', j, { heading: s[0], text: s[1] }));
+        m.table.forEach((r, j) => add('table_row', j, { cells: r }));
+        add('task', 0, { text: m.task });
+        add('answer', 0, { text: m.answer });
+        m.checks.forEach((t, j) => add('check', j, { text: t }));
+        (m.links || []).forEach((l, j) => add('link', j, { label: l[0], url: l[1] }));
+      }
+      say('блоков к записи: ' + rows.length, 'b');
+
+      const ids = [...new Set(rows.map((r) => r.module_id))];
+      const del = await sb.from('module_blocks').delete().in('module_id', ids);
+      if (del.error) throw new Error('очистка: ' + del.error.message);
+      say('старые блоки удалены');
+
+      for (let i = 0; i < rows.length; i += 100) {
+        const { error: insErr } = await sb.from('module_blocks').insert(rows.slice(i, i + 100));
+        if (insErr) throw new Error('вставка на позиции ' + i + ': ' + insErr.message);
+        say('записано ' + Math.min(i + 100, rows.length) + ' из ' + rows.length);
+      }
+
+      const check = await sb.rpc('published_book');
+      if (check.error) throw new Error('проверка: ' + check.error.message);
+      say('в базе опубликовано глав: ' + check.data.length, 'b');
+      say('ГОТОВО. Открой учебник и обнови с Ctrl+F5.', 'b');
+    } catch (error) {
+      say('ОШИБКА: ' + error.message, 'i');
+    } finally { btn.disabled = false; }
+  });
+})();
+</script>
+</body></html>

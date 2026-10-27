@@ -38,7 +38,8 @@ table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:10px;bord
       <p id="status" role="status"></p>
     </form>
   </div>
-  <div class="card"><h2>Последние приглашения</h2><div id="list">Загрузка…</div></div>`;
+  <div class="card"><h2>Последние приглашения</h2><div id="list">Загрузка…</div></div>`
+  <p><a href="../index.html">← К учебнику</a></p>`;
   await loadList();
 
   document.querySelector('#invite').addEventListener('submit', async (event) => {

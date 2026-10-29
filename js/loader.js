@@ -16,7 +16,7 @@
    }catch(e){console.warn('Главы из базы не получены, используем JSON:',e.message);return null}
  };
  const manifest=await get('content/book.json');
- const remote=await fromDB();
+ const remote=null; // главы берём из content/modules/*.json; база отключена
  const modules=remote?remote.map(m=>({
    title:String(m.title??''),hours:Number(m.hours??0),goal:String(m.goal??''),
    sections:Array.isArray(m.sections)?m.sections:[],table:Array.isArray(m.table)?m.table:[],

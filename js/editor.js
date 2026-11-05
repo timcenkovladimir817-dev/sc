@@ -51,7 +51,54 @@ function editor(){
 }
 let editorSections=[],editorImages=[];
 function captureSections(){document.querySelectorAll('[data-section]').forEach((el,i)=>{editorSections[i]=[el.querySelector('input').value,el.querySelector('textarea').value]})}
-function drawEditSections(){$('#section-editor').innerHTML=editorSections.map((s,i)=>`<div data-section="${i}" class="card" style="background:#f6f8fd"><label>Заголовок раздела ${i+1}<input value="${escapeHTML(s[0])}" required></label><label>Текст раздела<textarea style="min-height:220px">${escapeHTML(s[1])}</textarea></label><div class="actions"><button type="button" class="secondary" onclick="moveSection(${i},-1)" ${i===0?'disabled':''}>↑</button><button type="button" class="secondary" onclick="moveSection(${i},1)" ${i===editorSections.length-1?'disabled':''}>↓</button><button type="button" class="secondary" onclick="deleteSection(${i})" ${editorSections.length===1?'disabled':''}>Удалить раздел</button></div></div>`).join('')}
+function drawEditSections() {
+    $('#section-editor').innerHTML = editorSections.map((s, i) => {
+        // Гарантируем, что 3-й элемент (массив картинок) существует
+        const sectionImages = Array.isArray(s[2]) ? s[2] : [];
+        
+        const imagesHtml = sectionImages.map((img, imgIdx) => `
+            <div style="display:flex; align-items:center; gap:10px; margin-top:8px; padding:8px; background:#fff; border-radius:6px; border:1px solid #e2e8f0;">
+                <img src="${img[1]}" style="width:60px; height:60px; object-fit:cover; border-radius:4px; border:1px solid #cbd5e1;">
+                <span style="flex:1; font-size:0.85rem; color:#475569; word-break:break-all;">${escapeHTML(img[0])}</span>
+                <button type="button" class="secondary" style="padding:4px 8px; font-size:0.8rem; color:#dc2626;" onclick="removeSectionImage(${i}, ${imgIdx})">Удалить</button>
+            </div>
+        `).join('');
+
+        return `
+        <div data-section="${i}" class="editor-section-card">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
+                <strong style="color:#2563eb; font-size:1rem;">Раздел ${i + 1}</strong>
+                <div style="display:flex; gap:4px;">
+                    <button type="button" class="secondary" onclick="moveSection(${i},-1)" ${i===0?'disabled':''} title="Вверх">↑</button>
+                    <button type="button" class="secondary" onclick="moveSection(${i},1)" ${i===editorSections.length-1?'disabled':''} title="Вниз">↓</button>
+                    <button type="button" class="secondary" onclick="deleteSection(${i})" ${editorSections.length===1?'disabled':''} title="Удалить раздел" style="color:#dc2626;">✕</button>
+                </div>
+            </div>
+            
+            <label style="display:block; margin-bottom:0.75rem;">
+                <span style="font-size:0.85rem; color:#64748b; font-weight:600;">Заголовок раздела</span>
+                <input value="${escapeHTML(s[0])}" required style="width:100%; margin-top:4px; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.95rem;">
+            </label>
+            
+            <label style="display:block; margin-bottom:0.75rem;">
+                <span style="font-size:0.85rem; color:#64748b; font-weight:600;">Текст раздела</span>
+                <textarea style="width:100%; min-height:140px; margin-top:4px; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.95rem; line-height:1.5;">${escapeHTML(s[1])}</textarea>
+            </label>
+
+            <!-- Менеджер изображений раздела -->
+            <div style="margin-top:1rem; padding:1rem; background:#f8fafc; border:1px dashed #cbd5e1; border-radius:8px;">
+                <span style="font-size:0.85rem; color:#475569; font-weight:600; display:block; margin-bottom:0.5rem;">📷 Изображения этого раздела</span>
+                <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
+                    <input type="file" accept="image/png,image/jpeg,image/webp" onchange="addSectionImage(${i}, this)" style="flex:1; min-width:200px; padding:6px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; background:#fff;">
+                    <input type="text" id="sec-img-caption-${i}" placeholder="Подпись к рисунку (например: Рис. 1. Дефект)" style="flex:2; min-width:250px; padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem;">
+                </div>
+                <div id="sec-img-list-${i}">
+                    ${sectionImages.length ? imagesHtml : '<span style="font-size:0.8rem; color:#94a3b8;">Изображений пока нет</span>'}
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
 function moveSection(i,d){captureSections();const j=i+d;if(j<0||j>=editorSections.length)return;[editorSections[i],editorSections[j]]=[editorSections[j],editorSections[i]];editorDirty=true;drawEditSections()}
 function deleteSection(i){captureSections();if(editorSections.length===1||!confirm('Удалить этот раздел?'))return;editorSections.splice(i,1);editorDirty=true;drawEditSections()}
 function drawImages(){$('#image-editor').innerHTML=editorImages.map((im,i)=>`<div class="card"><img src="${im.data}" alt="" style="max-width:230px;max-height:180px"><label>Подпись<input data-caption="${i}" value="${escapeHTML(im.caption)}"></label><button type="button" class="secondary" onclick="removeImage(${i})">Удалить изображение</button></div>`).join('');document.querySelectorAll('[data-caption]').forEach(el=>el.oninput=()=>{editorImages[Number(el.dataset.caption)].caption=el.value;editorDirty=true})}

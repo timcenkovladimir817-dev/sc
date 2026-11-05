@@ -101,6 +101,52 @@ function drawEditSections() {
 }
 function moveSection(i,d){captureSections();const j=i+d;if(j<0||j>=editorSections.length)return;[editorSections[i],editorSections[j]]=[editorSections[j],editorSections[i]];editorDirty=true;drawEditSections()}
 function deleteSection(i){captureSections();if(editorSections.length===1||!confirm('Удалить этот раздел?'))return;editorSections.splice(i,1);editorDirty=true;drawEditSections()}
+async function addSectionImage(sectionIndex, inputElement) {
+    const f = inputElement.files[0];
+    if (!f) return;
+    
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(f.type) || f.size > 3 * 1024 * 1024) {
+        alert('Нужен PNG, JPEG или WebP размером не более 3 МБ.');
+        inputElement.value = '';
+        return;
+    }
+
+    const captionInput = document.getElementById(`sec-img-caption-${sectionIndex}`);
+    const caption = captionInput.value.trim() || f.name;
+
+    try {
+        const data = await new Promise((resolve, reject) => {
+            const r = new FileReader();
+            r.onload = () => resolve(r.result);
+            r.onerror = reject;
+            r.readAsDataURL(f);
+        });
+
+        // Гарантируем наличие массива для 3-го элемента
+        if (!Array.isArray(editorSections[sectionIndex][2])) {
+            editorSections[sectionIndex][2] = [];
+        }
+        
+        editorSections[sectionIndex][2].push([caption, data]);
+        editorDirty = true;
+
+        // Очищаем поля ввода
+        inputElement.value = '';
+        captionInput.value = '';
+
+        // Перерисовываем разделы для отображения новой картинки
+        drawEditSections();
+    } catch (e) {
+        alert('Не удалось прочитать изображение. Попробуйте другой файл.');
+    }
+}
+
+function removeSectionImage(sectionIndex, imageIndex) {
+    if (!confirm('Удалить это изображение из раздела?')) return;
+    editorSections[sectionIndex][2].splice(imageIndex, 1);
+    editorDirty = true;
+    drawEditSections();
+}
 function drawImages(){$('#image-editor').innerHTML=editorImages.map((im,i)=>`<div class="card"><img src="${im.data}" alt="" style="max-width:230px;max-height:180px"><label>Подпись<input data-caption="${i}" value="${escapeHTML(im.caption)}"></label><button type="button" class="secondary" onclick="removeImage(${i})">Удалить изображение</button></div>`).join('');document.querySelectorAll('[data-caption]').forEach(el=>el.oninput=()=>{editorImages[Number(el.dataset.caption)].caption=el.value;editorDirty=true})}
 function removeImage(i){editorImages.splice(i,1);editorDirty=true;drawImages()}
 async function addImage(e){const f=e.target.files[0];if(!f)return;if(!['image/png','image/jpeg','image/webp'].includes(f.type)||f.size>3*1024*1024){alert('Нужен PNG, JPEG или WebP не больше 3 МБ.');return}if(editorImages.length>=30){alert('Не больше 30 изображений в главе.');return}try{const data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(f)});editorImages.push({data,caption:f.name});editorDirty=true;drawImages()}catch(e){alert('Не удалось прочитать изображение.')}}

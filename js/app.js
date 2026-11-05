@@ -12,6 +12,40 @@ let current='home',activeModule=0;
 function nav(page){current=page;$('#nav').innerHTML=pages.map(([k,t])=>`<button data-page="${k}" class="${k===page?'active':''}" ${k===page?'aria-current="page"':''}>${t}</button>`).join('');$('#title').textContent=pages.find(x=>x[0]===page)[1];render();window.scrollTo(0,0)}
 $('#nav').addEventListener('click',e=>{const b=e.target.closest('[data-page]');if(b)nav(b.dataset.page)});
 function render(){if(current==='home')home();if(current==='modules')catalog();if(current==='standards')standards();if(current==='calc')calc();if(current==='test')startQuiz()}
+/**
+ * Генерирует HTML-код для одного раздела с поддержкой изображений
+ * @param {Object} section - Объект раздела из JSON
+ * @returns {string} HTML-разметка раздела
+ */
+function renderSection(section) {
+    let html = `<article class="content-section">`;
+    html += `<h3 class="section-title">${section.title || ''}</h3>`;
+    html += `<div class="section-text">${section.text || ''}</div>`;
+    
+    // Отрисовка изображений внутри раздела
+    if (section.images && Array.isArray(section.images) && section.images.length > 0) {
+        html += `<div class="section-images-grid">`;
+        section.images.forEach(img => {
+            const imgSrc = img.src || img.data || ''; // Поддержка и 'src', и старого 'data'
+            const caption = img.caption || '';
+            
+            html += `
+                <figure class="image-card">
+                    <img src="${imgSrc}" alt="${caption}" loading="lazy" onerror="this.style.display='none'; this.nextElementSibling.textContent='Изображение не загружено';">
+                    <figcaption class="image-caption">${caption}</figcaption>
+                </figure>
+            `;
+        });
+        html += `</div>`;
+    }
+    
+    html += `</article>`;
+    return html;
+}
+
+// Пример использования внутри вашей основной функции рендеринга главы:
+// const sectionsHtml = moduleData.sections.map(renderSection).join('');
+// document.getElementById('chapter-content').innerHTML = sectionsHtml;
 function home(){const chars=modules.reduce((s,m)=>s+m.sections.reduce((n,x)=>n+x[1].length,0),0);$('#view').innerHTML=`<div class="grid"><div class="card"><span class="pill">Расширенная программа</span><div class="stat">${modules.length} модулей · ${modules.reduce((n,m)=>n+m.hours,0)} ч с практикой</div><p>Конструкция, нормы, безопасность, фланцы, гидравлика, утечки, диагностика, ремонт и приёмка.</p></div><div class="card"><span class="pill">Ваш прогресс</span><div class="stat">${state.done.length} / ${modules.length}</div><div class="bar"><span style="width:${state.done.length/modules.length*100}%"></span></div><p>Лучший тест: ${state.best===null?'ещё не пройден':state.best+'%'}</p></div></div><div class="card" style="margin-top:20px"><h2>Подробное пособие по вашему перечню тем</h2><p>Внутри ${modules.reduce((n,m)=>n+m.sections.length,0)} разделов: устройство и подбор, характеристики и авторитет, Kv/Cv, FL, кавитация, уплотнения, приводы, позиционеры, ГОСТы, фланцы, диагностика, ремонт и испытания. Есть расчётные примеры, инженерные таблицы и пять комплексных кейсов. Можно записывать решения и возвращаться к ним позже.</p><p class="muted">Указанные академические часы — проект продолжительности курса, включая практику с наставником. Текст этого файла сам по себе не составляет 150 часов обучения.</p><div class="actions"><button onclick="nav('modules')">Открыть модули</button><button class="secondary" onclick="openLesson(0)">Начать первый урок</button></div></div><div class="notice">${storageOK?'Прогресс и ответы сохраняются в этом браузере. Очистка данных может удалить их.':'Хранилище недоступно. Данные останутся только в памяти страницы.'} Есть встроенный редактор: откройте пункт «Редактор книги». Нет аккаунтов, сервера и передачи ответов наставнику. Это подробный универсальный учебный материал, а не утверждённая инструкция для конкретного оборудования. Нормативные таблицы и полные тексты стандартов не включены. Для материалов старой версии используется отдельный ключ хранения; прежний прогресс не импортируется.</div><button class="secondary" onclick="resetProgress()">Сбросить прогресс</button>`}
 function catalog(){ $('#view').innerHTML=`<p class="muted">Выберите урок. Назначенное время включает задания и практику, а не только чтение.</p><label for="search">Поиск по содержанию</label><input id="search" class="search" placeholder="Например: кавитация, прокладка, затвор"><div id="catalog" class="grid"></div>`;drawCatalog('');$('#search').addEventListener('input',e=>drawCatalog(e.target.value))}
 function drawCatalog(query){const q=query.toLowerCase();const list=modules.map((m,i)=>({m,i})).filter(({m})=>JSON.stringify(m).toLowerCase().includes(q));$('#catalog').innerHTML=list.length?list.map(({m:raw,i})=>{const m=cleanModule(raw);return `<article class="card"><span class="pill">Модуль ${i+1} · ${m.hours} акад. ч</span><h2>${m.title}</h2><p>${m.goal}</p><p class="reading">${m.sections.length} разделов · таблица · задача · разбор</p><button onclick="openLesson(${i})">${state.done.includes(i)?'✓ Изучено · открыть':'Изучить модуль'}</button></article>`}).join(''):'<p>Совпадений нет.</p>'}

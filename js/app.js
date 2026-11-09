@@ -7,7 +7,7 @@ const KEY='armatura.training.project.v5';
 let state={done:[],notes:{},best:null},storageOK=true;
 try{const saved=JSON.parse(localStorage.getItem(KEY));if(saved&&typeof saved==='object'){state.done=Array.isArray(saved.done)?[...new Set(saved.done.filter(x=>Number.isInteger(x)&&x>=0&&x<modules.length))]:[];state.notes=Object.fromEntries(Object.entries(saved.notes||{}).filter(([k,v])=>/^\d+$/.test(k)&&typeof v==='string'));state.best=typeof saved.best==='number'&&saved.best>=0&&saved.best<=100?saved.best:null}}catch(e){storageOK=false}
 function save(){try{localStorage.setItem(KEY,JSON.stringify(state));return true}catch(e){storageOK=false;return false}}
-const pages=[['home','Обзор'],['modules','Учебные модули'],['standards','ГОСТы'],['calc','Калькулятор Kv'],['test','Проверка знаний']];
+const pages=[['home','Обзор'],['modules','Учебные модули'],['standards','ГОСТы'],['calc','Калькуляторы'],['test','Проверка знаний']];
 let current='home',activeModule=0;
 function nav(page){current=page;$('#nav').innerHTML=pages.map(([k,t])=>`<button data-page="${k}" class="${k===page?'active':''}" ${k===page?'aria-current="page"':''}>${t}</button>`).join('');$('#title').textContent=pages.find(x=>x[0]===page)[1];render();window.scrollTo(0,0)}
 $('#nav').addEventListener('click',e=>{const b=e.target.closest('[data-page]');if(b)nav(b.dataset.page)});
@@ -55,7 +55,276 @@ function toggleDone(i){state.done=state.done.includes(i)?state.done.filter(x=>x!
 function resetProgress(){if(confirm('Удалить ответы, отметки и результат теста в этом браузере?')){state={done:[],notes:{},best:null};save();home()}}
 const norms=BOOK.standards;
 function standards(){$('#view').innerHTML=`<div class="notice">Это стартовый справочный перечень, не реестр действующих редакций. Проверяйте статус, изменения и область применения в уполномоченной нормативной базе страны эксплуатации. Полные тексты не включены. Ссылки на публикации не подтверждают их актуальность.</div><div class="card">${table([['Документ','Название','Публикация'],...norms.map(n=>[n[0],n[1],n[2]?`<a href="${n[2]}" target="_blank" rel="noopener noreferrer">Открыть ↗</a>`:'Найти в нормативной базе'])])}</div><div class="card"><h2>Шаблон карты требований</h2>${table([['Показатель','Критерий','Источник и пункт','Метод','Результат'],['Герметичность затвора','Из документации изделия','Указать редакцию и пункт','По программе','Значение и единицы'],['Размер детали','Из чертежа / ремонтного документа','Указать обозначение','Утверждённый метод','Измеренное значение']])}</div>`}
-function calc(){$('#view').innerHTML=`<div class="grid"><form class="card" id="calc-form"><h2>Предварительный расчёт жидкости</h2><div class="field"><label for="q">Расход Q, м³/ч</label><input id="q" type="number" step="any" min="0.000001" required value="25"></div><div class="field"><label for="dp">Перепад на клапане Δp, бар</label><input id="dp" type="number" step="any" min="0.000001" required value="1"></div><div class="field"><label for="sg">Относительная плотность SG</label><input id="sg" type="number" step="any" min="0.000001" required value="1"></div><button>Рассчитать</button></form><div class="card"><h2>Результат</h2><div id="calc-result" aria-live="polite">Введите исходные данные.</div><p style="margin-top:20px">Kv = Q × √(SG / Δp)</p><p class="muted">SG — безразмерное отношение плотности жидкости к плотности воды.</p></div></div><div class="notice">Не применять для газа и пара. Упрощённая оценка не учитывает вязкостные поправки, кавитацию, вскипание, ограничение расхода и влияние обвязки. Расчётное Kv не является окончательным Kvs или выбором DN.</div>`;$('#calc-form').addEventListener('submit',e=>{e.preventDefault();const v=requiredKv(Number($('#q').value),Number($('#dp').value),Number($('#sg').value));$('#calc-result').innerHTML=v===null?'Проверьте данные: требуются конечные положительные числа.':`<div class="stat">Kv = ${v.toLocaleString('ru-RU',{maximumFractionDigits:3})}</div><p>Предварительная потребность в пропускной способности.</p>`})}
+function calc(){
+  const materialOptions=Object.entries(STEEL_GROUPS).map(([k,g])=>`<option value="${k}">${g.label}</option>`).join('');
+  const mediumOptions=Object.entries(MEDIUM_PRESETS).map(([k,m])=>`<option value="${k}">${m.label}</option>`).join('');
+  const categoryOptions=Object.entries(MEDIUM_CATEGORIES).map(([k,c])=>`<option value="${k}">${c.label}</option>`).join('');
+  const pipelineOptions=Object.entries(PIPELINE_MEDIA).map(([k,m])=>`<option value="${k}">${m.label}</option>`).join('');
+  $('#view').innerHTML=`
+    <div class="notice">Калькуляторы дают предварительный подбор по ГОСТ 33259-2015, ГОСТ 356-80, ГОСТ 15180-86 и ГОСТ 32569-2013. Они не заменяют проект, паспорт изделия и каталог изготовителя. Для кислорода, хлора, сильных окислителей и нестандартных сред автоматический подбор прокладки не выполняется: нужна отдельная оценка химической стойкости.</div>
+    <div class="calc-tabs" role="tablist" aria-label="Калькуляторы">
+      <button class="calc-tab active" data-calc-tab="kv" role="tab" aria-selected="true">Kv жидкости</button>
+      <button class="calc-tab" data-calc-tab="flange" role="tab" aria-selected="false">Фланец и прокладка</button>
+      <button class="calc-tab" data-calc-tab="pn" role="tab" aria-selected="false">PN по температуре</button>
+      <button class="calc-tab" data-calc-tab="dn" role="tab" aria-selected="false">DN по расходу</button>
+    </div>
+    <section class="calc-panel" id="calc-panel-kv" role="tabpanel">
+      <div class="grid">
+        <form class="card" id="calc-form">
+          <h2>Предварительный расчёт жидкости</h2>
+          <div class="field"><label for="q">Расход Q, м³/ч</label><input id="q" type="number" step="any" min="0.000001" required value="25"></div>
+          <div class="field"><label for="dp">Перепад на клапане Δp, бар</label><input id="dp" type="number" step="any" min="0.000001" required value="1"></div>
+          <div class="field"><label for="sg">Относительная плотность SG</label><input id="sg" type="number" step="any" min="0.000001" required value="1"></div>
+          <button>Рассчитать</button>
+        </form>
+        <div class="card">
+          <h2>Результат</h2>
+          <div id="calc-result" aria-live="polite">Введите исходные данные.</div>
+          <p style="margin-top:20px">Kv = Q × √(SG / Δp)</p>
+          <p class="muted">SG — безразмерное отношение плотности жидкости к плотности воды.</p>
+        </div>
+      </div>
+      <div class="notice">Не применять для газа и пара. Упрощённая оценка не учитывает вязкостные поправки, кавитацию, вскипание, ограничение расхода и влияние обвязки. Расчётное Kv не является окончательным Kvs или выбором DN.</div>
+    </section>
+    <section class="calc-panel" id="calc-panel-flange" role="tabpanel" hidden>
+      <div class="grid">
+        <form class="card" id="flange-form">
+          <h2>Подбор фланца и прокладки</h2>
+          <div class="form-grid">
+            <div class="field full">
+              <label for="fl-medium">Рабочая среда</label>
+              <select id="fl-medium">${mediumOptions}</select>
+              <p class="small muted" id="fl-medium-note"></p>
+            </div>
+            <div class="field">
+              <label for="fl-pressure" id="fl-pressure-label">Рабочее давление, МПа</label>
+              <input id="fl-pressure" type="number" step="any" min="0.0001" value="1.0" required>
+            </div>
+            <div class="field">
+              <label for="fl-temp">Температура, °C</label>
+              <input id="fl-temp" type="number" step="1" value="20" required>
+            </div>
+            <div class="field">
+              <label for="fl-dn">DN, мм</label>
+              <input id="fl-dn" type="number" step="1" min="10" max="4000" value="100" required>
+            </div>
+            <div class="field">
+              <label for="fl-material">Материал фланца</label>
+              <select id="fl-material">${materialOptions}</select>
+            </div>
+            <div class="field">
+              <label for="fl-category">Категория среды по ГОСТ 12.1</label>
+              <select id="fl-category">${categoryOptions}</select>
+            </div>
+            <div class="field">
+              <label for="fl-group">Группа трубопровода по ГОСТ 32569</label>
+              <select id="fl-group"><option value="">не задана</option><option value="A">А</option><option value="B">Б</option><option value="V">В</option></select>
+            </div>
+          </div>
+          <button>Подобрать</button>
+          <p class="small muted">Для вакуума введите остаточное абсолютное давление. Категорию среды можно уточнить вручную, если паспорт среды относит её к другому классу.</p>
+        </form>
+        <div class="card">
+          <h2>Результат подбора</h2>
+          <div id="flange-result" aria-live="polite">Введите данные и нажмите «Подобрать».</div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Что учитывается</h2>
+        <p>Сначала по рабочему давлению и температуре выбирается ближайшая ступень PN по ГОСТ 356-80. Затем по категории среды и PN назначается исполнение уплотнительной поверхности по ГОСТ 33259-2015, подбирается прокладка по ГОСТ 15180-86 и тип фланца. Для технологических трубопроводов выводится дополнительная проверка по ГОСТ 32569-2013.</p>
+        ${table([
+          ['Шаг','Исходные данные','Нормативная основа'],
+          ['PN','Давление, температура, материал','ГОСТ 356-80, табл. 2–10'],
+          ['Уплотнительная поверхность','Категория среды, PN','ГОСТ 33259-2015, табл. А.1'],
+          ['Прокладка','Исполнение поверхности, PN, DN, температура','ГОСТ 15180-86; ГОСТ 34655-2020'],
+          ['Тип фланца','PN, DN, температура, среда','ГОСТ 33259-2015']
+        ])}
+        <p class="small muted">Если исходные данные выходят за табличный диапазон, калькулятор не экстраполирует: он сообщает об ограничении. Для промежуточных температур применяется линейная интерполяция по п. 6 ГОСТ 356-80.</p>
+      </div>
+    </section>
+    <section class="calc-panel" id="calc-panel-pn" role="tabpanel" hidden>
+      <div class="grid">
+        <form class="card" id="pn-form">
+          <h2>Рабочее давление по PN и температуре</h2>
+          <div class="field"><label for="pn-material">Материал</label><select id="pn-material">${materialOptions}</select></div>
+          <div class="field"><label for="pn-pn">Номинальное давление PN</label><select id="pn-pn"></select></div>
+          <div class="field"><label for="pn-temp">Температура, °C</label><input id="pn-temp" type="number" step="1" value="200" required></div>
+          <button>Рассчитать</button>
+        </form>
+        <div class="card"><h2>Результат</h2><div id="pn-result" aria-live="polite">Введите данные.</div></div>
+      </div>
+      <div class="notice">Это обратная проверка к ГОСТ 356-80: по известному PN и температуре определяется допускаемое рабочее давление. Для температур ниже 20 °C и выше последней ступени таблицы необходима отдельная проверка по НТД и проекту.</div>
+    </section>
+    <section class="calc-panel" id="calc-panel-dn" role="tabpanel" hidden>
+      <div class="grid">
+        <form class="card" id="dn-form">
+          <h2>DN по расходу и скорости</h2>
+          <div class="field"><label for="dn-medium">Среда</label><select id="dn-medium">${pipelineOptions}</select></div>
+          <div class="field"><label for="dn-flow">Расход Q, м³/ч</label><input id="dn-flow" type="number" step="any" min="0.000001" value="25" required></div>
+          <div class="field"><label for="dn-velocity">Скорость v, м/с</label><input id="dn-velocity" type="number" step="any" min="0.000001" value="2" required><p class="small muted" id="dn-velocity-note"></p></div>
+          <button>Рассчитать</button>
+        </form>
+        <div class="card"><h2>Результат</h2><div id="dn-result" aria-live="polite">Введите данные.</div></div>
+      </div>
+      <div class="notice">Расчёт по формуле D = √(4Q/(πv)) с переводом единиц. Для газа и пара нужен фактический объёмный расход при рабочих условиях. Диаметр не учитывает потери давления, кавитацию, допустимую скорость по проекту и требования безопасности.</div>
+    </section>
+  `;
+  document.querySelectorAll('[data-calc-tab]').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      const tab=btn.dataset.calcTab;
+      document.querySelectorAll('[data-calc-tab]').forEach(b=>{
+        const active=b===btn;
+        b.classList.toggle('active',active);
+        b.setAttribute('aria-selected',active?'true':'false');
+      });
+      document.querySelectorAll('.calc-panel').forEach(p=>{p.hidden=p.id!=='calc-panel-'+tab;});
+    });
+  });
+  $('#calc-form').addEventListener('submit',e=>{
+    e.preventDefault();
+    const v=requiredKv(Number($('#q').value),Number($('#dp').value),Number($('#sg').value));
+    $('#calc-result').innerHTML=v===null?'Проверьте данные: требуются конечные положительные числа.':`<div class="stat">Kv = ${v.toLocaleString('ru-RU',{maximumFractionDigits:3})}</div><p>Предварительная потребность в пропускной способности.</p>`;
+  });
+  const mediumSel=$('#fl-medium');
+  const categorySel=$('#fl-category');
+  const pressureInput=$('#fl-pressure');
+  const pressureLabel=$('#fl-pressure-label');
+  const mediumNote=$('#fl-medium-note');
+  let lastVacuum=false;
+  function syncMedium(force){
+    const m=MEDIUM_PRESETS[mediumSel.value]||MEDIUM_PRESETS.other;
+    categorySel.value=m.category;
+    const vac=m.category==='vacuum';
+    pressureLabel.textContent=vac?'Остаточное давление, МПа абс.':'Рабочее давление, МПа';
+    pressureInput.min=vac?'0.001':'0.0001';
+    if(force||vac!==lastVacuum){pressureInput.value=vac?'0.05':'1.0';}
+    lastVacuum=vac;
+    mediumNote.textContent=m.note||'';
+  }
+  mediumSel.addEventListener('change',()=>syncMedium(false));
+  categorySel.addEventListener('change',()=>{
+    const vac=categorySel.value==='vacuum';
+    pressureLabel.textContent=vac?'Остаточное давление, МПа абс.':'Рабочее давление, МПа';
+    pressureInput.min=vac?'0.001':'0.0001';
+    if(vac!==lastVacuum){pressureInput.value=vac?'0.05':'1.0';lastVacuum=vac;}
+  });
+  syncMedium(true);
+  const runFlange=()=>{
+    const result=calcFlangeAssembly({
+      mediumKey:mediumSel.value,
+      category:categorySel.value,
+      pressure:pressureInput.value,
+      temperature:$('#fl-temp').value,
+      dn:$('#fl-dn').value,
+      materialKey:$('#fl-material').value,
+      pipelineGroup:$('#fl-group').value
+    });
+    $('#flange-result').innerHTML=renderFlangeResult(result);
+  };
+  $('#flange-form').addEventListener('submit',e=>{e.preventDefault();runFlange();});
+  runFlange();
+  const pnMaterialSel=$('#pn-material');
+  const pnSelect=$('#pn-pn');
+  const fillPnOptions=()=>{
+    const group=STEEL_GROUPS[pnMaterialSel.value];
+    pnSelect.innerHTML=group.rows.map(r=>`<option value="${r.pn}">PN ${fmtNum(r.pn*10,1)} (${fmtNum(r.pn)} МПа)</option>`).join('');
+    pnSelect.value=group.rows.some(r=>r.pn===1.6)?'1.6':String(group.rows[0].pn);
+  };
+  pnMaterialSel.addEventListener('change',fillPnOptions);
+  fillPnOptions();
+  const runPn=()=>{
+    const r=calcPnAtTemperature(pnMaterialSel.value,Number(pnSelect.value),Number($('#pn-temp').value));
+    $('#pn-result').innerHTML=renderPnResult(r);
+  };
+  $('#pn-form').addEventListener('submit',e=>{e.preventDefault();runPn();});
+  runPn();
+  const dnMediumSel=$('#dn-medium');
+  const dnVelocityInput=$('#dn-velocity');
+  const dnVelocityNote=$('#dn-velocity-note');
+  const syncDnVelocity=()=>{
+    const m=PIPELINE_MEDIA[dnMediumSel.value]||PIPELINE_MEDIA.water;
+    dnVelocityInput.value=m.velocity;
+    dnVelocityNote.textContent=`Справочный диапазон: ${m.range}`;
+  };
+  dnMediumSel.addEventListener('change',syncDnVelocity);
+  syncDnVelocity();
+  const runDn=()=>{
+    const r=calcPipelineDn(Number($('#dn-flow').value),Number(dnVelocityInput.value),dnMediumSel.value);
+    $('#dn-result').innerHTML=renderDnResult(r);
+  };
+  $('#dn-form').addEventListener('submit',e=>{e.preventDefault();runDn();});
+  runDn();
+}
+
+function calcList(items){
+  return `<ul class="warn-list">${(items||[]).map(x=>`<li>${escapeHTML(x)}</li>`).join('')}</ul>`;
+}
+
+function renderFlangeResult(r){
+  if(r.error)return `<div class="bad">${escapeHTML(r.error)}</div>`;
+  const pn=r.pnInfo;
+  const pnText=pn?`${fmtNum(pn.pn)} МПа <span class="small muted">(PN ${fmtNum(pn.pn*10,1)})</span>`:'не применимо (вакуум)';
+  const flangePnText=pn&&pn.flangePn?`${fmtNum(pn.flangePn)} МПа <span class="small muted">(PN ${fmtNum(pn.flangePn*10,1)})</span>`:'—';
+  const allowText=pn?`${fmtNum(pn.allow)} МПа`:'—';
+  const surf=r.surface;
+  const surf32569=r.surface32569;
+  const g=r.gasket;
+  const ft=r.flangeType;
+  const typeLabel=k=>FLANGE_TYPES[k]?FLANGE_TYPES[k].label:k;
+  const altSurfaces=(surf.alternatives||[]).join(', ')||'—';
+  const altTypes=(ft.alternatives||[]).map(typeLabel).join('; ')||'—';
+  const altGaskets=(g.alternatives||[]).map(a=>`${a.surface}: ${a.execution.label} (${a.material.label})`).join('; ')||'—';
+  return `
+    <div class="result-grid">
+      <div class="result-item"><div class="label">Требуемый PN по ГОСТ 356-80</div><div class="value">${pnText}</div><div class="small muted">${pn?`Допускаемое давление при ${fmtNum(r.temperature,0)} °C: ${allowText}`:'Вакуум — PN не определяется'}</div></div>
+      <div class="result-item"><div class="label">Ближайший PN фланца по ГОСТ 33259</div><div class="value">${flangePnText}</div><div class="small muted">Проверьте допускаемое давление по каталогу изготовителя</div></div>
+      <div class="result-item"><div class="label">Уплотнительная поверхность</div><div class="value">${escapeHTML(surf.primary)}</div><div class="small muted">${escapeHTML(surf.basis)}</div></div>
+      <div class="result-item"><div class="label">Прокладка</div><div class="value">${escapeHTML(g.execution.label)}</div><div class="small muted">${escapeHTML(g.material.label)}</div></div>
+      <div class="result-item"><div class="label">Тип фланца</div><div class="value">${escapeHTML(typeLabel(ft.primary))}</div><div class="small muted">${escapeHTML(ft.reasons[0]||'')}</div></div>
+    </div>
+    <h3>Расшифровка</h3>
+    ${table([
+      ['Параметр','Результат','Основание'],
+      ['Среда',escapeHTML(r.preset.label),'Категория: '+escapeHTML(MEDIUM_CATEGORIES[r.category].label)],
+      ['Материал',escapeHTML(r.materialGroup?r.materialGroup.short:'—'),'ГОСТ 356-80'],
+      ['Примечание по материалу',escapeHTML(r.materialGroup&&r.materialGroup.note?r.materialGroup.note:'—'),'ГОСТ 356-80'],
+      ['PN',pnText,pn?escapeHTML(pn.group.standard):'—'],
+      ['Допускаемое давление при температуре',allowText,pn?`Пробное давление: ${fmtNum(pn.test)} МПа`:'—'],
+      ['Уплотнительная поверхность',escapeHTML(surf.primary),'ГОСТ 33259-2015, табл. А.1'],
+      ['Альтернативы поверхности',escapeHTML(altSurfaces),'—'],
+      ['Прокладка',escapeHTML(g.execution.label),escapeHTML(g.execution.standard)],
+      ['Материал прокладки',escapeHTML(g.material.label),escapeHTML(g.material.temp+'; '+g.material.pn)],
+      ['Тип фланца',escapeHTML(typeLabel(ft.primary)),'ГОСТ 33259-2015'],
+      ['Альтернативные типы',escapeHTML(altTypes),'—'],
+      ['Альтернативные прокладки',escapeHTML(altGaskets),'—']
+    ])}
+    <h3>Проверка по ГОСТ 32569-2013</h3>
+    ${surf32569?`<p><b>${escapeHTML(surf32569.primary)}</b> — ${escapeHTML(surf32569.basis)}</p>`:'<p class="muted">Группа трубопровода не задана или для неё нет отдельного правила. Основной подбор — по ГОСТ 33259-2015.</p>'}
+    <h3>Предупреждения и ограничения</h3>
+    ${calcList(r.warnings)}
+    <details><summary>Показать типы фланцев по ГОСТ 33259-2015</summary>${table([
+      ['Тип','Назначение'],
+      ...Object.entries(FLANGE_TYPES).map(([k,v])=>[escapeHTML(v.label),escapeHTML(v.note)])
+    ])}</details>
+  `;
+}
+
+function renderPnResult(r){
+  if(r.error)return `<div class="bad">${escapeHTML(r.error)}</div>`;
+  return `<div class="stat">${fmtNum(r.allow)} МПа</div>
+    <p>Допускаемое рабочее давление для <b>${escapeHTML(r.group.short)}</b> при PN ${fmtNum(r.pn)} МПа (PN ${fmtNum(r.pn*10,1)}) и температуре ${fmtNum(r.temperature,0)} °C.</p>
+    <p class="muted">Пробное давление по таблице: ${fmtNum(r.test)} МПа. ${r.temperature>20?'Значение получено линейной интерполяцией между точками таблицы.':'PN определено при 20 °C; для температур ниже 20 °C проверьте хладостойкость.'}</p>
+    <div class="notice">Рабочее давление не должно превышать табличное значение. Допускается превышение не более чем на 5 % по п. 7 ГОСТ 356-80; при большем превышении выбирайте следующую ступень PN.</div>`;
+}
+
+function renderDnResult(r){
+  if(r.error)return `<div class="bad">${escapeHTML(r.error)}</div>`;
+  return `<div class="stat">DN ${r.dn!==null?fmtNum(r.dn,0):'—'}</div>
+    <p>Расчётный внутренний диаметр: ${fmtNum(r.d,1)} мм. Ближайший стандартный DN: ${r.dn!==null?fmtNum(r.dn,0)+' мм':'—'}.</p>
+    <p>Фактическая скорость при выбранном DN: ${r.actualVelocity!==null?fmtNum(r.actualVelocity,2)+' м/с':'—'}.</p>
+    <p class="muted">${escapeHTML(r.medium.label)}. Рекомендуемый диапазон: ${escapeHTML(r.medium.range)}.</p>
+    <div class="notice">Расчёт по объёмному расходу Q = v·π·D²/4. Для газа и пара указывайте фактический объёмный расход при рабочих условиях. Диаметр не учитывает потери давления, кавитацию и требования проекта.</div>`;
+}
 const questions=BOOK.quiz;
 let qi=0,score=0,locked=false;
 function startQuiz(){qi=0;score=0;showQuestion()}

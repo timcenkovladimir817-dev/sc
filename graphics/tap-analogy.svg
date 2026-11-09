@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" font-family="Arial, Helvetica, sans-serif">
+  <rect width="640" height="360" fill="#ffffff"/>
+  <text x="24" y="28" font-size="16" font-weight="700" fill="#15243e">Авторитет на пальцах: кран и шланг</text>
+  <text x="24" y="48" font-size="12" fill="#5b6b82">Кто в контуре является главным сопротивлением, тот и управляет расходом</text>
+
+  <!-- левая панель -->
+  <rect x="20" y="70" width="290" height="260" rx="12" fill="#f7fbf8" stroke="#cfe8d7"/>
+  <text x="165" y="98" font-size="14" font-weight="700" text-anchor="middle" fill="#15803d">Высокий авторитет</text>
+  <line x1="40" y1="150" x2="290" y2="150" stroke="#667" stroke-width="6"/>
+  <path d="M235 130 L265 150 L235 170 Z" fill="#fde8e8" stroke="#dc2626" stroke-width="2"/>
+  <path d="M295 130 L265 150 L295 170 Z" fill="#fde8e8" stroke="#dc2626" stroke-width="2"/>
+  <line x1="265" y1="130" x2="265" y2="112" stroke="#dc2626" stroke-width="2"/>
+  <line x1="250" y1="112" x2="280" y2="112" stroke="#dc2626" stroke-width="4"/>
+  <text x="265" y="190" font-size="11" text-anchor="middle" fill="#dc2626">кран</text>
+
+  <rect x="40" y="215" width="100" height="26" fill="#16a34a"/>
+  <rect x="140" y="215" width="150" height="26" fill="#dc2626"/>
+  <text x="90" y="233" font-size="11" text-anchor="middle" fill="#ffffff">40 %</text>
+  <text x="215" y="233" font-size="11" text-anchor="middle" fill="#ffffff">60 %</text>
+  <text x="165" y="262" font-size="10" text-anchor="middle" fill="#5b6b82">остальное 40 % · клапан 60 %</text>
+
+  <text x="165" y="290" font-size="11" text-anchor="middle" fill="#15243e">Кран — главное сопротивление.</text>
+  <text x="165" y="308" font-size="11" text-anchor="middle" fill="#15243e">Поворот сильно меняет поток.</text>
+
+  <!-- правая панель -->
+  <rect x="330" y="70" width="290" height="260" rx="12" fill="#fffaf3" stroke="#f0dcc0"/>
+  <text x="475" y="98" font-size="14" font-weight="700" text-anchor="middle" fill="#b45309">Низкий авторитет</text>
+  <line x1="350" y1="150" x2="600" y2="150" stroke="#667" stroke-width="6"/>
+  <rect x="405" y="128" width="40" height="14" rx="3" fill="#f59e0b"/>
+  <rect x="405" y="158" width="40" height="14" rx="3" fill="#f59e0b"/>
+  <text x="425" y="118" font-size="10" text-anchor="middle" fill="#b45309">сужение</text>
+  <path d="M520 130 L550 150 L520 170 Z" fill="#fde8e8" stroke="#dc2626" stroke-width="2"/>
+  <path d="M580 130 L550 150 L580 170 Z" fill="#fde8e8" stroke="#dc2626" stroke-width="2"/>
+  <line x1="550" y1="130" x2="550" y2="112" stroke="#dc2626" stroke-width="2"/>
+  <line x1="535" y1="112" x2="565" y2="112" stroke="#dc2626" stroke-width="4"/>
+  <text x="550" y="190" font-size="11" text-anchor="middle" fill="#dc2626">кран</text>
+
+  <rect x="350" y="215" width="225" height="26" fill="#16a34a"/>
+  <rect x="575" y="215" width="25" height="26" fill="#dc2626"/>
+  <text x="462" y="233" font-size="11" text-anchor="middle" fill="#ffffff">90 %</text>
+  <text x="588" y="208" font-size="10" text-anchor="middle" fill="#dc2626">10 %</text>
+  <text x="475" y="262" font-size="10" text-anchor="middle" fill="#5b6b82">остальное 90 % · клапан 10 %</text>
+
+  <text x="475" y="290" font-size="11" text-anchor="middle" fill="#15243e">Главное сопротивление — не кран.</text>
+  <text x="475" y="308" font-size="11" text-anchor="middle" fill="#15243e">Поворот меняет поток слабо.</text>
+</svg>

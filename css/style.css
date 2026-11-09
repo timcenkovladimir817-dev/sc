@@ -94,6 +94,7 @@ main {
   padding: 28px 38px;
   max-width: 1350px;
   width: 100%;
+  min-width: 0;
 }
 
 /* =========================================
@@ -115,6 +116,7 @@ main {
 }
 
 .grid .card { margin: 0; }
+.grid > * { min-width: 0; }
 
 button {
   cursor: pointer;
@@ -408,6 +410,96 @@ summary {
 }
 
 /* =========================================
+   8b. Калькуляторы
+   ========================================= */
+.calc-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.calc-tab {
+  background: #e9eefa;
+  color: #284aa2;
+  border: 1px solid transparent;
+  padding: 9px 15px;
+}
+
+.calc-tab:hover:not(:disabled) {
+  background: #dce4f5;
+}
+
+.calc-tab.active {
+  background: var(--primary);
+  color: white;
+}
+
+.calc-panel[hidden] {
+  display: none;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 16px;
+}
+
+.form-grid .field.full {
+  grid-column: 1 / -1;
+}
+
+.result-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.result-item {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  background: #fbfdff;
+}
+
+.result-item .label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--muted);
+  font-weight: 700;
+  margin-bottom: 5px;
+}
+
+.result-item .value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--primary);
+  line-height: 1.35;
+}
+
+.warn-list {
+  margin: 10px 0;
+  padding-left: 22px;
+}
+
+.warn-list li {
+  margin-bottom: 8px;
+}
+
+.small {
+  font-size: 13px;
+}
+
+details > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--primary);
+  margin: 12px 0;
+}
+
+/* =========================================
    9. Адаптивность (Responsive)
    ========================================= */
 @media (max-width: 850px) {
@@ -424,6 +516,9 @@ summary {
   main { padding: 19px 13px; }
   .card, .section, .content-section, .editor-section-card { padding: 19px; }
   h1 { font-size: 25px; }
+
+  /* Поля калькуляторов на мобильных в одну колонку */
+  .form-grid { grid-template-columns: 1fr; }
   
   /* На мобильных картинки в разделе идут одна под другой */
   .section-images-grid {

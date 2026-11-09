@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 580" font-family="Arial, Helvetica, sans-serif">
+  <rect width="760" height="580" fill="#ffffff"/>
+  <text x="24" y="30" font-size="16" font-weight="700" fill="#15243e">Порядок выбора и проверки регулирующего клапана</text>
+
+  <g font-size="13" fill="#15243e">
+    <rect x="80" y="70" width="380" height="42" rx="9" fill="#eef3fd" stroke="#315de0"/>
+    <text x="270" y="96" text-anchor="middle">1. Требуемые расходы и точность</text>
+
+    <rect x="80" y="128" width="380" height="42" rx="9" fill="#eef3fd" stroke="#315de0"/>
+    <text x="270" y="154" text-anchor="middle">2. Границы контура и включённое оборудование</text>
+
+    <rect x="80" y="186" width="380" height="42" rx="9" fill="#eef3fd" stroke="#315de0"/>
+    <text x="270" y="212" text-anchor="middle">3. Перепады и кривая насоса</text>
+
+    <rect x="80" y="244" width="380" height="42" rx="9" fill="#eef3fd" stroke="#315de0"/>
+    <text x="270" y="270" text-anchor="middle">4. Предварительный Kvs</text>
+
+    <rect x="80" y="302" width="380" height="42" rx="9" fill="#fef3e2" stroke="#d97706"/>
+    <text x="270" y="328" text-anchor="middle">5. Авторитет a = Δp v,100 / (Δp v,100 + Δp rest)</text>
+
+    <rect x="80" y="360" width="380" height="42" rx="9" fill="#fef3e2" stroke="#d97706"/>
+    <text x="270" y="386" text-anchor="middle">6. Установленная кривая q(h)</text>
+
+    <rect x="80" y="418" width="380" height="42" rx="9" fill="#eef3fd" stroke="#315de0"/>
+    <text x="270" y="444" text-anchor="middle">7. Привод, шум, кавитация, перепад при закрытии</text>
+
+    <rect x="80" y="476" width="380" height="42" rx="9" fill="#e8f6ec" stroke="#16a34a"/>
+    <text x="270" y="502" text-anchor="middle">8. Проверка на объекте и уточнение</text>
+  </g>
+
+  <!-- стрелки -->
+  <g stroke="#667" stroke-width="2" fill="#667">
+    <line x1="270" y1="112" x2="270" y2="128"/><polygon points="264,124 270,132 276,124"/>
+    <line x1="270" y1="170" x2="270" y2="186"/><polygon points="264,182 270,190 276,182"/>
+    <line x1="270" y1="228" x2="270" y2="244"/><polygon points="264,240 270,248 276,240"/>
+    <line x1="270" y1="286" x2="270" y2="302"/><polygon points="264,298 270,306 276,298"/>
+    <line x1="270" y1="344" x2="270" y2="360"/><polygon points="264,356 270,364 276,356"/>
+    <line x1="270" y1="402" x2="270" y2="418"/><polygon points="264,414 270,422 276,414"/>
+    <line x1="270" y1="460" x2="270" y2="476"/><polygon points="264,472 270,480 276,472"/>
+  </g>
+
+  <!-- выноска -->
+  <line x1="460" y1="323" x2="500" y2="323" stroke="#d97706" stroke-width="2" stroke-dasharray="5 4"/>
+  <rect x="500" y="278" width="236" height="126" rx="10" fill="#fffaf0" stroke="#d97706"/>
+  <text x="516" y="302" font-size="12" font-weight="700" fill="#9a5b00">Если a низкий</text>
+  <text x="516" y="324" font-size="11" fill="#5b6b82">• уменьшить Kvs клапана;</text>
+  <text x="516" y="342" font-size="11" fill="#5b6b82">• стабилизировать перепад;</text>
+  <text x="516" y="360" font-size="11" fill="#5b6b82">• проверить привод и люфт;</text>
+  <text x="516" y="378" font-size="11" fill="#5b6b82">• пересчитать q(h) и режимы.</text>
+
+  <text x="24" y="556" font-size="11" fill="#5b6b82">Шаги 5–6 повторяют для максимального, минимального и наиболее вероятного режима: одного расчётного режима недостаточно.</text>
+</svg>

@@ -1036,3 +1036,63 @@ html[data-theme="dark"] .auth-brand .mark { color: #e6ecf5; }
 @media print {
   .settings-fab, .settings-panel { display: none !important; }
 }
+
+/* =========================================
+   Назначение курса и глав (чекбоксы и окно)
+   ========================================= */
+.check-all {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+.check-all input { width: auto; }
+
+.module-checkboxes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 6px 14px;
+  max-height: 280px;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 9px;
+  background: #fff;
+}
+.module-checkboxes[hidden] { display: none; }
+html[data-theme="dark"] .module-checkboxes { background: #101a2a; border-color: #33445f; }
+
+.module-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.35;
+  cursor: pointer;
+}
+.module-check input { width: auto; margin-top: 2px; flex: 0 0 auto; }
+.module-check span { color: var(--ink); }
+
+.assign-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 24px 16px;
+  overflow: auto;
+}
+.assign-overlay[hidden] { display: none; }
+
+.assign-dialog {
+  width: 100%;
+  max-width: 640px;
+  margin: 0;
+}
+.assign-dialog h2 { margin-top: 0; }
+.assign-dialog .module-checkboxes { max-height: 220px; }

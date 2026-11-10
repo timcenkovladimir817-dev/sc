@@ -59,6 +59,11 @@
             <div class="field"><label for="dueDate">Срок прохождения</label><input id="dueDate" type="date"></div>
             <div class="field"><label for="course">Курс</label><select id="course"><option value="armatura">Запорная и регулирующая арматура</option></select></div>
           </div>
+          <div class="field">
+            <label>Главы курса</label>
+            <label class="check-all"><input type="checkbox" id="allModules" checked> Весь курс (все главы)</label>
+            <div id="module-list" class="module-checkboxes" hidden><p class="muted">Загрузка глав…</p></div>
+          </div>
           <div class="notice">Наставник и руководитель получают задачу в Bitrix24 как наблюдатели.
             Учётные записи им не создаются. Ссылка на прогресс будет показана после отправки.</div>
           <div class="actions"><button type="submit" id="send">Отправить приглашение</button></div>
@@ -237,18 +242,48 @@
     }
   });
 
-  // Курсы: если в базе есть список, показываем его; иначе остаётся armatura.
+  // Курсы и главы: подгружаем из базы; иначе остаётся armatura.
+  const courseMap = {};
+  async function renderModulePicker() {
+    const slug = document.querySelector('#course').value;
+    const course = courseMap[slug];
+    const box = document.querySelector('#module-list');
+    if (!course) { box.innerHTML = '<p class="muted">Нет данных о главах курса.</p>'; return; }
+    const { data: mods } = await sb.from('course_modules')
+      .select('slug, title').eq('course_id', course.id).order('position');
+    const list = Array.isArray(mods) ? mods : [];
+    box.innerHTML = list.map((m) =>
+      `<label class="module-check"><input type="checkbox" class="mod-check" value="${esc(m.slug)}" checked>
+        <span>${esc(m.title || m.slug)}</span></label>`).join('')
+      || '<p class="muted">У курса нет глав.</p>';
+  }
   (async () => {
-    const { data } = await sb.from('courses').select('slug, title').order('title');
+    const { data } = await sb.from('courses').select('slug, title, id').order('title');
     if (!Array.isArray(data) || !data.length) return;
+    data.forEach((course) => { courseMap[course.slug] = course; });
     document.querySelector('#course').innerHTML = data.map((course) =>
       `<option value="${esc(course.slug)}">${esc(course.title || course.slug)}</option>`).join('');
+    await renderModulePicker();
   })();
+  document.querySelector('#course').addEventListener('change', renderModulePicker);
+  document.querySelector('#allModules').addEventListener('change', (event) => {
+    document.querySelector('#module-list').hidden = event.target.checked;
+  });
 
   document.querySelector('#invite-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const status = document.querySelector('#status');
     const button = document.querySelector('#send');
+    const allChecked = document.querySelector('#allModules').checked;
+    let moduleSlugs = null;
+    if (!allChecked) {
+      moduleSlugs = Array.from(document.querySelectorAll('.mod-check:checked')).map((c) => c.value);
+      if (!moduleSlugs.length) {
+        status.className = 'notice err';
+        status.textContent = 'Выберите хотя бы одну главу или отметьте «Весь курс».';
+        return;
+      }
+    }
     const payload = {
       fullName: document.querySelector('#fullName').value,
       email: document.querySelector('#email').value,
@@ -258,6 +293,7 @@
       supervisorEmail: document.querySelector('#supervisor').value,
       dueDate: document.querySelector('#dueDate').value || null,
       courseSlug: document.querySelector('#course').value || 'armatura',
+      moduleSlugs,
     };
     status.className = 'notice';
     status.textContent = 'Отправляем…';
@@ -276,6 +312,9 @@
         + '<br><small>Ссылку стоит вставить в задачу или отправить наставнику и руководителю.</small>';
       event.target.reset();
       document.querySelector('#course').value = payload.courseSlug;
+      document.querySelector('#allModules').checked = true;
+      document.querySelector('#module-list').hidden = true;
+      await renderModulePicker();
       await loadOverview();
     } catch (error) {
       status.className = 'notice err';

@@ -33,12 +33,23 @@ window.__appReady = (async () => {
     // 3. Ученику нужен действующий курс, иначе показывать нечего.
     if (profile.role === 'student') {
       const { data: enrollments, error: enrollError } = await window.sb
-        .from('enrollments').select('id, status');
-      if (!enrollError && Array.isArray(enrollments) && !enrollments.some(e => e.status !== 'cancelled')) {
+        .from('enrollments').select('id, status, course_id');
+      const active = !enrollError && Array.isArray(enrollments)
+        ? enrollments.find(e => e.status !== 'cancelled')
+        : null;
+      if (!active) {
         document.querySelector('#view').innerHTML =
           '<div class="card"><h2>Курс не назначен</h2><p>Вам ещё не назначен учебный курс. Обратитесь к наставнику или администратору обучения.</p><p><a href="login.html">Войти под другой учётной записью</a></p></div>';
         return;
       }
+      // Назначенные главы (блоки). Пустой набор = весь курс.
+      try {
+        const { data: assigned, error: assignedError } = await window.sb
+          .from('enrollment_modules').select('module_slug').eq('enrollment_id', active.id);
+        if (!assignedError && Array.isArray(assigned) && assigned.length) {
+          window.ASSIGNED_SLUGS = assigned.map(r => r.module_slug);
+        }
+      } catch (e) { /* ограничение глав не критично — покажем весь курс */ }
     }
 
     // 4. Загрузка материалов.

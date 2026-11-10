@@ -64,6 +64,8 @@
   "supabase/migrations/0003_security.sql",
   "supabase/migrations/0004_admin_tools.sql",
   "supabase/migrations/0005_progress_sync.sql",
+  "supabase/migrations/0006_staff_access.sql",
+  "supabase/migrations/0007_module_assignment.sql",
   "supabase/functions/invite-user/index.ts",
   "supabase/functions/resend-invite/index.ts",
   "supabase/functions/block-user/index.ts",

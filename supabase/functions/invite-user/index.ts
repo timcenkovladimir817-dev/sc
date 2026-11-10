@@ -37,6 +37,10 @@ Deno.serve(async (req) => {
   const mentorEmail = cleanText(body.mentorEmail, 254).toLowerCase();
   const supervisorEmail = cleanText(body.supervisorEmail, 254).toLowerCase();
   const dueDate = body.dueDate ? cleanText(body.dueDate, 10) : null;
+  // Назначенные главы (блоки). null/пустой массив = весь курс.
+  const moduleSlugs: string[] | null = Array.isArray(body.moduleSlugs)
+    ? body.moduleSlugs.map((s: unknown) => cleanText(s, 40)).filter(Boolean)
+    : null;
 
   if (!EMAIL_RE.test(email)) return fail('Некорректный email сотрудника');
   if (fullName.length < 3) return fail('Укажите ФИО');
@@ -49,6 +53,15 @@ Deno.serve(async (req) => {
 
   const { data: course } = await admin.from('courses').select('id, title, module_count').eq('slug', courseSlug).maybeSingle();
   if (!course) return fail('Курс не найден', 404);
+
+  // Проверка, что выбранные главы принадлежат курсу (если задан поднабор).
+  if (moduleSlugs && moduleSlugs.length) {
+    const { data: courseModules } = await admin.from('course_modules')
+      .select('slug').eq('course_id', course.id);
+    const known = new Set((courseModules ?? []).map((m: { slug: string }) => m.slug));
+    const unknown = moduleSlugs.filter((s) => !known.has(s));
+    if (unknown.length) return fail(`Главы не найдены в курсе: ${unknown.join(', ')}`, 400);
+  }
 
   const { data: existing } = await admin.from('invitations')
     .select('id, status, created_at').eq('email', email).eq('status', 'pending').maybeSingle();
@@ -85,6 +98,16 @@ Deno.serve(async (req) => {
     return fail('Приглашение не создано: ' + (enrollmentError?.message ?? 'ошибка назначения'), 500);
   }
 
+  // Назначенные главы. Пусто = весь курс (строки не создаём).
+  if (moduleSlugs && moduleSlugs.length) {
+    const rows = moduleSlugs.map((slug) => ({ enrollment_id: enrollment.id, module_slug: slug }));
+    const { error: modulesError } = await admin.from('enrollment_modules').insert(rows);
+    if (modulesError) {
+      await admin.auth.admin.deleteUser(userId).catch(() => {});
+      return fail('Не удалось назначить главы: ' + modulesError.message, 500);
+    }
+  }
+
   const { data: linkToken } = await asUser.rpc('create_progress_link', { p_enrollment: enrollment.id, p_days: 365 });
   const progressUrl = `${SITE_URL}/progress.html?token=${linkToken}`;
 
@@ -95,7 +118,7 @@ Deno.serve(async (req) => {
   try {
     const task = await createTrainingTask({
       title: `Пройти обучение: ${course.title}`,
-      description: buildDescription({ fullName, courseTitle: course.title, moduleCount: course.module_count, progressUrl, dueDate }),
+      description: buildDescription({ fullName, courseTitle: course.title, moduleCount: moduleSlugs?.length || course.module_count, progressUrl, dueDate }),
       responsibleId: email,
       deadline: dueDate,
       observerEmails: observers,

@@ -15,6 +15,7 @@
 | `supabase/migrations/0004_admin_tools.sql` | Смена роли, отзыв приглашения, удаление, журнал действий, роль «наставник» |
 | `supabase/migrations/0005_progress_sync.sql` | Синхронизация прогресса ученика, заметки к модулям, напоминания |
 | `supabase/migrations/0006_staff_access.sql` | Роль «наставник»: видит чужой прогресс и выдаёт ссылки на прогресс |
+| `supabase/migrations/0007_module_assignment.sql` | Назначение курса и отдельных глав (блоков), пересчёт прогресса по назначенным главам |
 | `supabase/bootstrap-admin.sql` | Первый администратор (выполняется один раз вручную) |
 | `supabase/functions/invite-user` | Приглашение, Bitrix24, письмо, ссылка на прогресс |
 | `supabase/functions/resend-invite` | Повторное письмо для непринятого приглашения |

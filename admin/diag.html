@@ -228,7 +228,7 @@ button.secondary{background:#e9eefa;color:#284aa2}
 
     // 6. Таблицы
     say('Проверяю таблицы…');
-    for (const t of ['profiles', 'courses', 'course_modules', 'enrollments', 'module_progress', 'invitations', 'module_blocks']) {
+    for (const t of ['profiles', 'courses', 'course_modules', 'enrollments', 'module_progress', 'invitations', 'enrollment_modules', 'module_blocks']) {
       try {
         const r = await rest(t + '?select=*&limit=1', token);
         const n = Array.isArray(r.data) ? r.data.length : 0;

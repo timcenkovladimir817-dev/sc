@@ -20,7 +20,7 @@
   const me = staff.profile;
   const isAdmin = me.role === 'admin';
   const site = String(APP_CONFIG.siteUrl || '').replace(/\/$/, '');
-  const state = { profiles: [], enrollments: [], courses: [], invitations: [] };
+  const state = { profiles: [], enrollments: [], courses: [], invitations: [], courseModules: [], enrollmentModules: [] };
 
   app.innerHTML = `
     <div id="admin-nav"></div>
@@ -74,6 +74,29 @@ where lower(email) = lower('admin@example.com')
 returning id, email, role;</pre>
       <p><a href="diag.html">Открыть диагностику доступа</a></p>
     </details>
+
+    <div class="assign-overlay" id="assign-overlay" hidden>
+      <div class="card assign-dialog">
+        <h2>Назначить курс и главы</h2>
+        <p class="muted" id="assign-who"></p>
+        <div class="field"><label for="assign-course">Курс</label><select id="assign-course"></select></div>
+        <div class="field">
+          <label>Главы курса</label>
+          <label class="check-all"><input type="checkbox" id="assign-all" checked> Весь курс (все главы)</label>
+          <div id="assign-modules" class="module-checkboxes"><p class="muted">Загрузка глав…</p></div>
+        </div>
+        <div class="grid" style="gap:0 16px">
+          <div class="field"><label for="assign-mentor">Наставник (email)</label><input id="assign-mentor" type="email" maxlength="254"></div>
+          <div class="field"><label for="assign-supervisor">Руководитель (email)</label><input id="assign-supervisor" type="email" maxlength="254"></div>
+          <div class="field"><label for="assign-due">Срок прохождения</label><input id="assign-due" type="date"></div>
+        </div>
+        <div class="actions">
+          <button type="button" id="assign-save">Сохранить</button>
+          <button type="button" class="secondary" id="assign-cancel">Отмена</button>
+        </div>
+        <p id="assign-status" role="status" aria-live="polite"></p>
+      </div>
+    </div>
   `;
 
   const msg = document.querySelector('#msg');
@@ -132,6 +155,26 @@ returning id, email, role;</pre>
     return list.find((item) => item.status !== 'cancelled') || list[0];
   }
 
+  function modulesForCourse(courseId) {
+    return state.courseModules
+      .filter((m) => m.course_id === courseId)
+      .sort((a, b) => (Number(a.position) || 0) - (Number(b.position) || 0));
+  }
+
+  function assignedSlugs(enrollmentId) {
+    return new Set(state.enrollmentModules
+      .filter((m) => m.enrollment_id === enrollmentId)
+      .map((m) => m.module_slug));
+  }
+
+  function assignmentSummary(enrollment) {
+    if (!enrollment) return '';
+    const slugs = assignedSlugs(enrollment.id);
+    if (!slugs.size) return 'все главы';
+    const mods = modulesForCourse(enrollment.course_id).filter((m) => slugs.has(m.slug));
+    return mods.length ? mods.map((m) => m.slug).join(', ') : 'главы не выбраны';
+  }
+
   function roleOptions(current) {
     const options = [['student', 'Сотрудник'], ['teacher', 'Наставник'], ['admin', 'Администратор']];
     if (current && !options.some(([value]) => value === current)) options.push([current, current]);
@@ -164,11 +207,13 @@ returning id, email, role;</pre>
     usersBox.innerHTML = '<p class="muted">Загрузка пользователей…</p>';
     invitesBox.innerHTML = '<p class="muted">Загрузка приглашений…</p>';
 
-    const [profiles, enrollments, courses, invitations] = await Promise.all([
+    const [profiles, enrollments, courses, invitations, courseModules, enrollmentModules] = await Promise.all([
       selectAll('profiles', 'created_at'),
       selectAll('enrollments', 'created_at'),
       selectAll('courses', null),
       isAdmin ? selectAll('invitations', 'created_at') : Promise.resolve({ data: [], error: null }),
+      selectAll('course_modules', null),
+      selectAll('enrollment_modules', null),
     ]);
 
     if (profiles.error) {
@@ -184,6 +229,8 @@ returning id, email, role;</pre>
     state.enrollments = enrollments.error ? [] : (enrollments.data || []);
     state.courses = courses.error ? [] : (courses.data || []);
     state.invitations = invitations.error ? [] : (invitations.data || []);
+    state.courseModules = courseModules.error ? [] : (courseModules.data || []);
+    state.enrollmentModules = enrollmentModules.error ? [] : (enrollmentModules.data || []);
 
     renderStats();
     renderUsers();
@@ -278,6 +325,7 @@ returning id, email, role;</pre>
           <td data-label="Курс">
             ${enrollment ? `
               <div class="user-name">${escText(courseName(enrollment.course_id))}</div>
+              <div class="user-sub">Главы: ${escText(assignmentSummary(enrollment))}</div>
               ${progressBar(enrollment.progress)}
               <div class="user-sub">${escText(enrollment.progress || 0)}% · ${statusBadge(enrollment.status)}
                 ${enrollment.due_date ? ` · срок ${fmtDate(enrollment.due_date)}` : ''}
@@ -289,20 +337,24 @@ returning id, email, role;</pre>
             : '<span class="badge ok">Активен</span>'}</td>
           <td data-label="Действия">
             <div class="row-actions">
-              ${self ? '<span class="user-sub">Управление собой недоступно</span>' : isAdmin ? `
-                <button type="button" class="small secondary" data-block="${escText(user.id)}"
-                  title="${blocked ? 'Разблокировать вход' : 'Заблокировать вход'}">${blocked ? 'Разблок.' : 'Блок'}</button>
-                <button type="button" class="small secondary" data-reset="${escText(user.id)}"
-                  title="Отправить письмо для смены пароля">Пароль</button>
-                ${enrollment && enrollment.status !== 'completed' && enrollment.status !== 'cancelled' && enrollment.due_date
-                  ? `<button type="button" class="small secondary" data-remind="${escText(enrollment.id)}"
-                    title="Отправить напоминание о сроке по email">Срок</button>` : ''}
-                ${enrollment ? `<button type="button" class="small secondary" data-progress="${escText(enrollment.id)}"
-                  title="Создать ссылку на прогресс на 365 дней">Прогресс</button>` : ''}
-                <button type="button" class="small danger" data-delete="${escText(user.id)}"
-                  title="Удалить учётную запись полностью">Удалить</button>
-              ` : (enrollment ? `<button type="button" class="small secondary" data-progress="${escText(enrollment.id)}"
-                  title="Создать ссылку на прогресс на 365 дней">Прогресс</button>` : '<span class="user-sub">—</span>')}
+              ${self ? '<span class="user-sub">Управление собой недоступно</span>' : `
+                ${user.role === 'student' ? `<button type="button" class="small secondary" data-assign="${escText(user.id)}"
+                  title="Назначить курс и главы">Назначить</button>` : ''}
+                ${isAdmin ? `
+                  <button type="button" class="small secondary" data-block="${escText(user.id)}"
+                    title="${blocked ? 'Разблокировать вход' : 'Заблокировать вход'}">${blocked ? 'Разблок.' : 'Блок'}</button>
+                  <button type="button" class="small secondary" data-reset="${escText(user.id)}"
+                    title="Отправить письмо для смены пароля">Пароль</button>
+                  ${enrollment && enrollment.status !== 'completed' && enrollment.status !== 'cancelled' && enrollment.due_date
+                    ? `<button type="button" class="small secondary" data-remind="${escText(enrollment.id)}"
+                      title="Отправить напоминание о сроке по email">Срок</button>` : ''}
+                  ${enrollment ? `<button type="button" class="small secondary" data-progress="${escText(enrollment.id)}"
+                    title="Создать ссылку на прогресс на 365 дней">Прогресс</button>` : ''}
+                  <button type="button" class="small danger" data-delete="${escText(user.id)}"
+                    title="Удалить учётную запись полностью">Удалить</button>
+                ` : (enrollment ? `<button type="button" class="small secondary" data-progress="${escText(enrollment.id)}"
+                    title="Создать ссылку на прогресс на 365 дней">Прогресс</button>` : '<span class="user-sub">—</span>')}
+              `}
             </div>
           </td>
         </tr>`;
@@ -401,6 +453,105 @@ returning id, email, role;</pre>
     return data;
   }
 
+  // Назначение курса и глав существующему сотруднику (админ и наставник).
+  const overlay = document.querySelector('#assign-overlay');
+  const assignCourseSel = document.querySelector('#assign-course');
+  const assignModulesBox = document.querySelector('#assign-modules');
+  const assignAllChk = document.querySelector('#assign-all');
+  const assignStatus = document.querySelector('#assign-status');
+  const assignSaveBtn = document.querySelector('#assign-save');
+  let assignUserId = null;
+
+  function fillAssignCourses() {
+    assignCourseSel.innerHTML = state.courses.map((c) =>
+      `<option value="${escText(c.id)}">${escText(c.title || c.slug || 'Курс')}</option>`).join('')
+      || '<option value="">— нет курсов —</option>';
+  }
+
+  function renderAssignModules() {
+    const mods = modulesForCourse(assignCourseSel.value);
+    assignModulesBox.innerHTML = mods.map((m) =>
+      `<label class="module-check"><input type="checkbox" class="assign-mod-check" value="${escText(m.slug)}" checked>
+        <span>${escText(m.slug)} · ${escText(m.title || '')}</span></label>`).join('')
+      || '<p class="muted">У курса нет глав.</p>';
+  }
+
+  function openAssign(userId) {
+    assignUserId = userId;
+    const user = state.profiles.find((p) => p.id === userId);
+    const enrollment = primaryEnrollment(userId);
+    document.querySelector('#assign-who').textContent = user ? (user.full_name || user.email || '') : '';
+    assignStatus.className = 'notice';
+    assignStatus.textContent = '';
+    fillAssignCourses();
+    if (enrollment && state.courses.some((c) => c.id === enrollment.course_id)) {
+      assignCourseSel.value = enrollment.course_id;
+    }
+    document.querySelector('#assign-mentor').value = enrollment ? (enrollment.mentor_email || '') : '';
+    document.querySelector('#assign-supervisor').value = enrollment ? (enrollment.supervisor_email || '') : '';
+    document.querySelector('#assign-due').value = enrollment && enrollment.due_date ? enrollment.due_date : '';
+    assignAllChk.checked = true;
+    assignModulesBox.hidden = true;
+    renderAssignModules();
+    const slugs = enrollment ? assignedSlugs(enrollment.id) : new Set();
+    if (slugs.size) {
+      assignAllChk.checked = false;
+      assignModulesBox.hidden = false;
+      assignModulesBox.querySelectorAll('.assign-mod-check').forEach((cb) => { cb.checked = slugs.has(cb.value); });
+    }
+    overlay.hidden = false;
+  }
+
+  function closeAssign() {
+    overlay.hidden = true;
+    assignUserId = null;
+  }
+
+  async function saveAssign() {
+    if (!assignUserId) return;
+    let moduleSlugs = null;
+    if (!assignAllChk.checked) {
+      moduleSlugs = Array.from(assignModulesBox.querySelectorAll('.assign-mod-check:checked')).map((cb) => cb.value);
+      if (!moduleSlugs.length) {
+        assignStatus.className = 'notice err';
+        assignStatus.textContent = 'Выберите хотя бы одну главу или отметьте «Весь курс».';
+        return;
+      }
+    }
+    if (!assignCourseSel.value) {
+      assignStatus.className = 'notice err';
+      assignStatus.textContent = 'Выберите курс.';
+      return;
+    }
+    assignSaveBtn.disabled = true;
+    assignStatus.className = 'notice';
+    assignStatus.textContent = 'Сохраняем…';
+    try {
+      const { error } = await sb.rpc('assign_enrollment', {
+        p_user: assignUserId,
+        p_course_id: assignCourseSel.value,
+        p_module_slugs: moduleSlugs,
+        p_mentor_email: document.querySelector('#assign-mentor').value || null,
+        p_supervisor_email: document.querySelector('#assign-supervisor').value || null,
+        p_due_date: document.querySelector('#assign-due').value || null,
+      });
+      if (error) {
+        const hint = error.code === 'PGRST202' || /could not find the function/i.test(error.message)
+          ? ' Выполните supabase/migrations/0007_module_assignment.sql в SQL Editor.'
+          : '';
+        throw new Error(error.message + hint);
+      }
+      closeAssign();
+      await load();
+      notify('Назначение сохранено.', 'ok');
+    } catch (error) {
+      assignStatus.className = 'notice err';
+      assignStatus.textContent = 'Не сохранено: ' + escText(error.message);
+    } finally {
+      assignSaveBtn.disabled = false;
+    }
+  }
+
   function exportCsv() {
     const q = document.querySelector('#q').value.trim().toLowerCase();
     const filter = document.querySelector('#filter').value;
@@ -442,8 +593,13 @@ returning id, email, role;</pre>
 
   // Делегирование: таблицы перерисовываются, обработчики остаются на контейнерах.
   usersBox.addEventListener('click', async (event) => {
-    const button = event.target.closest('button[data-block],button[data-reset],button[data-progress],button[data-delete],button[data-remind]');
+    const button = event.target.closest('button[data-block],button[data-reset],button[data-progress],button[data-delete],button[data-remind],button[data-assign]');
     if (!button) return;
+
+    if (button.dataset.assign) {
+      openAssign(button.dataset.assign);
+      return;
+    }
 
     if (button.dataset.remind) {
       button.disabled = true;
@@ -613,6 +769,20 @@ returning id, email, role;</pre>
       }
     });
   }
+
+  document.querySelector('#assign-cancel').addEventListener('click', closeAssign);
+  document.querySelector('#assign-save').addEventListener('click', saveAssign);
+  document.querySelector('#assign-course').addEventListener('change', () => {
+    assignAllChk.checked = true;
+    assignModulesBox.hidden = true;
+    renderAssignModules();
+  });
+  document.querySelector('#assign-all').addEventListener('change', (event) => {
+    assignModulesBox.hidden = event.target.checked;
+  });
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) closeAssign();
+  });
 
   await load();
 })().catch((error) => {

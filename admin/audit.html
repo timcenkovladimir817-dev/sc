@@ -28,6 +28,7 @@
     password_reset_sent: 'Сброс пароля',
     progress_link_created: 'Ссылка на прогресс',
     reminders_sent: 'Напоминания о сроках',
+    course_assigned: 'Назначение курса',
   };
 
   app.innerHTML = `
@@ -52,6 +53,7 @@
           <option value="password_reset_sent">Сброс пароля</option>
           <option value="progress_link_created">Ссылка на прогресс</option>
           <option value="reminders_sent">Напоминания</option>
+          <option value="course_assigned">Назначение курса</option>
         </select>
         <button type="button" class="secondary" id="refresh">Обновить</button>
       </div>
@@ -86,6 +88,7 @@
       case 'password_reset_sent': return `отправил письмо для сброса пароля${email}`;
       case 'progress_link_created': return 'выдал ссылку на прогресс';
       case 'reminders_sent': return 'отправил напоминания о сроках';
+      case 'course_assigned': return `назначил курс${details.courseTitle ? ' «' + esc(details.courseTitle) + '»' : ''}${email}`;
       default: return esc(action);
     }
   }

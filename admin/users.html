@@ -479,7 +479,10 @@ returning id, email, role;</pre>
     if (button.dataset.reset) {
       if (!user.email) { notify('У пользователя не заполнен email.', 'err'); return; }
       button.disabled = true;
-      const { error } = await sb.auth.resetPasswordForEmail(user.email, { redirectTo: `${site}/reset.html` });
+      // Сброс ведём на reset.html в текущем окружении, а не на захардкоженный siteUrl:
+      // иначе при локальной проверке письмо уходит на чужой адрес (корень/Site URL).
+      const resetUrl = new URL('../reset.html', location.href).href;
+      const { error } = await sb.auth.resetPasswordForEmail(user.email, { redirectTo: resetUrl });
       button.disabled = false;
       if (error) notify('Письмо не отправлено: ' + escText(error.message), 'err');
       else {

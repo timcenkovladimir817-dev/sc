@@ -79,8 +79,15 @@ Supabase → **Authentication**:
    на сайте нет формы регистрации.
 2. **URL Configuration**:
    - Site URL: `https://timcenkovladimir817-dev.github.io/sc`
-   - Redirect URLs: `https://timcenkovladimir817-dev.github.io/sc/reset.html`
-   - Для локальной проверки добавьте `http://localhost:8000/reset.html`.
+   - Redirect URLs (можно с подстановкой `**`):
+     `https://timcenkovladimir817-dev.github.io/sc/**`
+   - Для локальной проверки добавьте адрес своего локального сервера, например:
+     `http://localhost:3000/**` или `http://localhost:8000/**`.
+
+   Важно: `redirectTo`, который передаёт сайт при запросе сброса пароля, действует
+   только если этот адрес входит в Redirect URLs. Если его там нет, Supabase молча
+   подставляет Site URL, и письмо ведёт на корень сайта (а не на `/reset.html`) или
+   вовсе на чужой адрес. Поэтому при смене домена обновляйте и Site URL, и список.
 3. **Email Templates**: письмо приглашения отправляет не Supabase, а Edge Function через
    Яндекс SMTP. Встроенные письма Supabase нужны только для восстановления пароля.
 4. Пароль — не короче 10 символов. Это проверяет `reset.html`.

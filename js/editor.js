@@ -21,7 +21,7 @@ function validateBook(data){
  if(!Array.isArray(m.table)||!m.table.length||m.table.some(r=>!Array.isArray(r)||!r.length||r.some(x=>typeof x!=='string')))throw Error('Неверная таблица.');
  if(!Array.isArray(m.checks)||m.checks.some(x=>typeof x!=='string'))throw Error('Неверные вопросы.');
  if(m.origin!==undefined&&(!Number.isInteger(m.origin)||m.origin<0||m.origin>15))throw Error('Неверный идентификатор источников.');
- if(m.images!==undefined&&(!Array.isArray(m.images)||m.images.length>30||m.images.some(x=>!x||typeof x.caption!=='string'||typeof x.data!=='string'||!(/^(images\/|graphics\/)[A-Za-z0-9_./-]+$/.test(x.data)||/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(x.data)))))throw Error('Неверное изображение.');
+ if(m.images!==undefined&&(!Array.isArray(m.images)||m.images.length>30||m.images.some(x=>!x||typeof x.caption!=='string'||typeof x.data!=='string'||!(/^(images\/|graphics\/)[A-Za-z0-9_./-]+$/.test(x.data)||/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(x.data)||/^https:\/\/[^\s"'<>]+$/.test(x.data)))))throw Error('Неверное изображение: загрузите файл или укажите путь images/имя-файла.jpg либо https://…');
  if(m.links!==undefined&&(!Array.isArray(m.links)||m.links.some(x=>!Array.isArray(x)||x.length!==2||x.some(s=>typeof s!=='string')||!/^https?:\/\//i.test(x[1]))))throw Error('Ссылки должны начинаться с https:// или http://');
  }
  return data.modules;
@@ -42,7 +42,7 @@ if (window.CAN_EDIT) {
 }
 function editor(){
  editorIndex=Math.min(Math.max(0,editorIndex),modules.length-1);
- $('#view').innerHTML=`<div class="notice"><b>Как работать:</b> выберите главу → измените поля → «Сохранить главу» → «Скачать весь проект ZIP». Сам исходный файл не перезаписывается. Экспорт создаёт новый файл в папке загрузок браузера.<br>Редактор доступен администратору и наставнику; изменения сохраняются локально и передаются через экспорт.</div><div class="card"><h2>Книга и резервные копии</h2><div class="actions"><button id="export-html">Скачать весь проект ZIP</button><button id="export-chapter" class="secondary">Скачать только главу JSON</button><button id="export-json" class="secondary">Скачать резервную копию JSON</button><button id="import-json" class="secondary">Загрузить копию JSON</button><button id="all-preview" class="secondary">Просмотреть всю книгу</button></div><input type="file" id="json-file" accept="application/json,.json" hidden><p id="book-status" role="status" style="margin-top:12px"></p><small>JSON содержит материалы, но не ответы читателей. Храните копии с датой. Большие изображения могут превысить лимит хранения браузера — экспортируйте HTML и JSON.</small></div><div class="card"><label for="edit-select">Модуль для редактирования</label><select id="edit-select">${modules.map((m,i)=>`<option value="${i}" ${i===editorIndex?'selected':''}>${i+1}. ${escapeHTML(m.title)}</option>`).join('')}</select><div class="actions"><button id="add-module">+ Новый модуль</button><button class="secondary" id="duplicate-module">Копировать модуль</button><button class="secondary" id="module-up" ${editorIndex===0?'disabled':''}>↑ Выше</button><button class="secondary" id="module-down" ${editorIndex===modules.length-1?'disabled':''}>↓ Ниже</button><button class="secondary" id="delete-module" ${modules.length===1?'disabled':''}>Удалить модуль</button></div></div><form id="editor-form" class="card"><h2>Содержание главы</h2><div class="field"><label for="etitle">Название</label><input id="etitle" required maxlength="500"></div><div class="field"><label for="ehours">Часы, включая практику</label><input id="ehours" type="number" min="0" max="10000" step="0.5" required></div><div class="field"><label for="egoal">Цель обучения</label><textarea id="egoal" style="min-height:90px"></textarea></div><h3>Разделы</h3><p class="muted">Пишите обычный текст, без HTML-кода. Переносы строк сохранятся.</p><div id="section-editor"></div><button type="button" id="add-section" class="secondary">+ Добавить раздел</button><div class="field" style="margin-top:20px"><label for="etable">Инженерная таблица</label><small>Одна строка таблицы — одна строка текста. Столбцы разделяйте знаком |. Первая строка — заголовки. Не используйте | внутри ячеек.</small><textarea id="etable"></textarea></div><div class="field"><label for="etask">Практическое задание</label><textarea id="etask"></textarea></div><div class="field"><label for="eanswer">Разбор и критерии ответа</label><textarea id="eanswer"></textarea></div><div class="field"><label for="echecks">Вопросы самопроверки — по одному на строку</label><textarea id="echecks"></textarea></div><div class="field"><label for="elinks">Ссылки — по одной на строку: название | https://адрес</label><textarea id="elinks" placeholder="Руководство изготовителя | https://example.com/manual.pdf"></textarea></div><h3>Изображения главы</h3><p class="muted">PNG, JPEG или WebP, до 3 МБ на изображение. Встраиваются в файл, интернет для просмотра не нужен.</p><input type="file" id="image-file" accept="image/png,image/jpeg,image/webp"><div id="image-editor"></div><div class="notice">Здесь редактируются содержание, таблицы, задания и вопросы самопроверки. Итоговый тест и расчётные формулы остаются программными — они не меняются автоматически вместе с главой.</div><div class="actions"><button type="submit">Сохранить главу</button><button type="button" id="preview-module" class="secondary">Сохранить и посмотреть</button></div><p id="edit-status" role="status"></p></form>`;
+ $('#view').innerHTML=`<div class="notice"><b>Как работать:</b> выберите главу → измените поля → «Сохранить главу» → «Скачать весь проект ZIP». Сам исходный файл не перезаписывается. Экспорт создаёт новый файл в папке загрузок браузера.<br>Редактор доступен администратору и наставнику; изменения сохраняются локально и передаются через экспорт.</div><div class="card"><h2>Книга и резервные копии</h2><div class="actions"><button id="export-html">Скачать весь проект ZIP</button><button id="export-chapter" class="secondary">Скачать только главу JSON</button><button id="export-json" class="secondary">Скачать резервную копию JSON</button><button id="import-json" class="secondary">Загрузить копию JSON</button><button id="all-preview" class="secondary">Просмотреть всю книгу</button></div><input type="file" id="json-file" accept="application/json,.json" hidden><p id="book-status" role="status" style="margin-top:12px"></p><small>JSON содержит материалы, но не ответы читателей. Храните копии с датой. Большие изображения могут превысить лимит хранения браузера — экспортируйте HTML и JSON.</small></div><div class="card"><label for="edit-select">Модуль для редактирования</label><select id="edit-select">${modules.map((m,i)=>`<option value="${i}" ${i===editorIndex?'selected':''}>${i+1}. ${escapeHTML(m.title)}</option>`).join('')}</select><div class="actions"><button id="add-module">+ Новый модуль</button><button class="secondary" id="duplicate-module">Копировать модуль</button><button class="secondary" id="module-up" ${editorIndex===0?'disabled':''}>↑ Выше</button><button class="secondary" id="module-down" ${editorIndex===modules.length-1?'disabled':''}>↓ Ниже</button><button class="secondary" id="delete-module" ${modules.length===1?'disabled':''}>Удалить модуль</button></div></div><form id="editor-form" class="card"><h2>Содержание главы</h2><div class="field"><label for="etitle">Название</label><input id="etitle" required maxlength="500"></div><div class="field"><label for="ehours">Часы, включая практику</label><input id="ehours" type="number" min="0" max="10000" step="0.5" required></div><div class="field"><label for="egoal">Цель обучения</label><textarea id="egoal" style="min-height:90px"></textarea></div><h3>Разделы</h3><p class="muted">Пишите обычный текст, без HTML-кода. Переносы строк сохранятся.</p><div id="section-editor"></div><button type="button" id="add-section" class="secondary">+ Добавить раздел</button><div class="field" style="margin-top:20px"><label for="etable">Инженерная таблица</label><small>Одна строка таблицы — одна строка текста. Столбцы разделяйте знаком |. Первая строка — заголовки. Не используйте | внутри ячеек.</small><textarea id="etable"></textarea></div><div class="field"><label for="etask">Практическое задание</label><textarea id="etask"></textarea></div><div class="field"><label for="eanswer">Разбор и критерии ответа</label><textarea id="eanswer"></textarea></div><div class="field"><label for="echecks">Вопросы самопроверки — по одному на строку</label><textarea id="echecks"></textarea></div><div class="field"><label for="elinks">Ссылки — по одной на строку: название | https://адрес</label><textarea id="elinks" placeholder="Руководство изготовителя | https://example.com/manual.pdf"></textarea></div><h3>Изображения главы</h3><p class="muted">Загрузите PNG, JPEG или WebP — файл сохранится в хранилище, а в JSON попадёт только ссылка. Либо укажите путь к файлу в images/ вручную.</p><div class="actions"><button type="button" id="add-image" class="secondary">+ Загрузить изображение</button><button type="button" id="add-image-path" class="secondary">+ Путь вручную</button></div><div id="image-editor"></div><div class="notice">Здесь редактируются содержание, таблицы, задания и вопросы самопроверки. Итоговый тест и расчётные формулы остаются программными — они не меняются автоматически вместе с главой.</div><div class="actions"><button type="submit">Сохранить главу</button><button type="button" id="preview-module" class="secondary">Сохранить и посмотреть</button></div><p id="edit-status" role="status"></p></form>`;
  const m=modules[editorIndex];
  for(const [id,key] of [['etitle','title'],['ehours','hours'],['egoal','goal'],['etask','task'],['eanswer','answer']])$('#'+id).value=m[key];
  $('#etable').value=m.table.map(r=>r.join(' | ')).join('\n');$('#echecks').value=m.checks.join('\n');$('#elinks').value=(m.links||[]).map(l=>l.join(' | ')).join('\n');
@@ -58,7 +58,7 @@ function editor(){
  $('#import-json').onclick=()=>$('#json-file').click();$('#json-file').onchange=importBook;
  $('#all-preview').onclick=()=>{if(editorDirty&&!saveChapter())return;current='modules';showAll()};
  $('#add-module').onclick=()=>modifyStructure('add');$('#duplicate-module').onclick=()=>modifyStructure('duplicate');$('#delete-module').onclick=()=>modifyStructure('delete');$('#module-up').onclick=()=>modifyStructure('up');$('#module-down').onclick=()=>modifyStructure('down');
- $('#image-file').onchange=addImage;
+ $('#add-image').onclick=()=>{imageFileTarget=null;const inp=ensureImageInput();inp.value='';inp.click()};$('#add-image-path').onclick=addImageEntry;
 }
 let editorSections=[],editorImages=[];
 // Блочная модель раздела: {heading, blocks:[{t:'text',x}|{t:'image',src,cap}|{t:'video',src,cap}]}
@@ -88,26 +88,46 @@ function deleteBlock(i,bi){if(!confirm('Удалить этот блок?'))retu
 function blockText(i,bi,v){editorSections[i].blocks[bi].x=v;editorDirty=true}
 function blockSrc(i,bi,v){editorSections[i].blocks[bi].src=v;editorDirty=true}
 function blockCap(i,bi,v){editorSections[i].blocks[bi].cap=v;editorDirty=true}
-let pendingImageSection=null,pendingImageBlock=null,blockImageInput=null;
+// Загрузка картинки в хранилище: файл уходит на сервер, в JSON попадает ссылка.
+let imageFileInput=null,imageFileTarget=null;
 function ensureImageInput(){
- if(blockImageInput)return blockImageInput;
- blockImageInput=document.createElement('input');blockImageInput.type='file';blockImageInput.accept='image/png,image/jpeg,image/webp';blockImageInput.style.display='none';
- document.body.appendChild(blockImageInput);
- blockImageInput.addEventListener('change',()=>{if(pendingImageSection!==null)addSectionImageFile(pendingImageSection,blockImageInput,pendingImageBlock)});
- return blockImageInput;
+ if(imageFileInput)return imageFileInput;
+ imageFileInput=document.createElement('input');imageFileInput.type='file';imageFileInput.accept='image/png,image/jpeg,image/webp';imageFileInput.style.display='none';
+ document.body.appendChild(imageFileInput);
+ imageFileInput.addEventListener('change',onImageFilePicked);
+ return imageFileInput;
 }
-function pickSectionImage(i){pendingImageSection=i;pendingImageBlock=null;const inp=ensureImageInput();inp.value='';inp.click()}
-function replaceBlockImage(i,bi){pendingImageSection=i;pendingImageBlock=bi;const inp=ensureImageInput();inp.value='';inp.click()}
-async function addSectionImageFile(i,input,replaceIdx){
- const f=input.files&&input.files[0];if(!f)return;
- if(!['image/png','image/jpeg','image/webp'].includes(f.type)||f.size>3*1024*1024){alert('Нужен PNG, JPEG или WebP размером не более 3 МБ.');input.value='';return}
+function pickSectionImage(i){imageFileTarget={section:i,block:null};const inp=ensureImageInput();inp.value='';inp.click()}
+function replaceBlockImage(i,bi){imageFileTarget={section:i,block:bi};const inp=ensureImageInput();inp.value='';inp.click()}
+async function uploadImageFile(file){
+ const dataUrl=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file)});
+ const comma=String(dataUrl).indexOf(',');const base64=comma>=0?String(dataUrl).slice(comma+1):'';
+ if(!base64)throw Error('Не удалось прочитать файл');
+ if(typeof window.callFunction!=='function')throw Error('Загрузка недоступна: функция сервера не подключена');
+ const res=await window.callFunction('upload-image',{contentType:file.type,data:base64});
+ if(!res||!res.url)throw Error('Сервер не вернул адрес изображения');
+ return res.url;
+}
+async function onImageFilePicked(){
+ const f=imageFileInput&&imageFileInput.files&&imageFileInput.files[0];
+ if(imageFileInput)imageFileInput.value='';
+ if(!f)return;
+ if(!['image/png','image/jpeg','image/webp'].includes(f.type)||f.size>3*1024*1024){alert('Нужен PNG, JPEG или WebP не больше 3 МБ.');return}
+ const target=imageFileTarget;imageFileTarget=null;
  try{
-  const data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(f)});
+  const url=await uploadImageFile(f);
   const caption=f.name.replace(/\.[^.]+$/,'').replace(/[_-]+/g,' ').trim();
-  if(replaceIdx!==undefined&&replaceIdx!==null){const b=editorSections[i].blocks[replaceIdx];b.src=data;if(!b.cap)b.cap=caption;}
-  else{editorSections[i].blocks.push({t:'image',src:data,cap:caption});}
-  editorDirty=true;input.value='';drawEditSections();
- }catch(e){alert('Не удалось прочитать изображение. Попробуйте другой файл.')}
+  if(target&&target.section!==undefined){
+   if(target.block!==undefined&&target.block!==null){const b=editorSections[target.section].blocks[target.block];b.src=url;if(!b.cap)b.cap=caption;}
+   else{editorSections[target.section].blocks.push({t:'image',src:url,cap:caption});}
+   drawEditSections();
+  }else{
+   if(editorImages.length>=30){alert('Не больше 30 изображений в главе.');return}
+   editorImages.push({data:url,caption});
+   drawImages();
+  }
+  editorDirty=true;
+ }catch(e){alert('Не удалось загрузить изображение: '+e.message)}
 }
 function blockCard(i,bi,b){
  const up=`<button type="button" class="secondary" onclick="moveBlock(${i},${bi},-1)" ${bi===0?'disabled':''} title="Выше">↑</button>`;
@@ -117,8 +137,8 @@ function blockCard(i,bi,b){
  if(b.t==='text')return `${head('Текст')}<textarea class="eblock-text" oninput="blockText(${i},${bi},this.value)" placeholder="Текст…">${escapeHTML(b.x||'')}</textarea></div>`;
  if(b.t==='image'){
   const src=b.src||'';
-  const preview=/^data:image\//.test(src)?`<img class="eblock-img" src="${escapeHTML(src)}" alt="">`:`<div class="eblock-img-empty">${src?('Файл: '+escapeHTML(src)):'Картинка не выбрана'}</div>`;
-  return `${head('Картинка')}${preview}<button type="button" class="secondary" onclick="replaceBlockImage(${i},${bi})">${src?'Заменить файл':'Выбрать файл'}</button><input class="eblock-cap" value="${escapeHTML(b.cap||'')}" oninput="blockCap(${i},${bi},this.value)" placeholder="Подпись к рисунку"></div>`;
+  const preview=/^(images\/|graphics\/|https:\/\/)/.test(src)?`<img class="eblock-img" src="${escapeHTML(src)}" alt="" onerror="this.style.display='none'">`:`<div class="eblock-img-empty">${src?('Файл: '+escapeHTML(src)):'Путь не указан'}</div>`;
+  return `${head('Картинка')}<button type="button" class="secondary" onclick="replaceBlockImage(${i},${bi})">${src?'Заменить файл':'Загрузить файл'}</button><input class="eblock-src" value="${escapeHTML(src)}" oninput="blockSrc(${i},${bi},this.value)" placeholder="images/фото.jpg или https://…"><div class="eblock-hint">Загрузите файл — он сохранится в хранилище, либо укажите путь к файлу в images/.</div>${preview}<input class="eblock-cap" value="${escapeHTML(b.cap||'')}" oninput="blockCap(${i},${bi},this.value)" placeholder="Подпись к рисунку"></div>`;
  }
  const src=b.src||'';
  const ok=typeof videoEmbed==='function'&&videoEmbed(src);
@@ -131,16 +151,16 @@ function drawEditSections(){
   return `<div data-section="${i}" class="editor-section-card"><div class="esec-head"><strong>Раздел ${i+1}</strong><div class="esec-actions"><button type="button" class="secondary" onclick="moveSection(${i},-1)" ${i===0?'disabled':''} title="Вверх">↑</button><button type="button" class="secondary" onclick="moveSection(${i},1)" ${i===editorSections.length-1?'disabled':''} title="Вниз">↓</button><button type="button" class="secondary" onclick="deleteSection(${i})" ${editorSections.length===1?'disabled':''} title="Удалить раздел" style="color:#dc2626;">✕</button></div></div><label class="esec-label"><span>Заголовок раздела</span><input value="${escapeHTML(sec.heading||'')}" required oninput="sectionHeading(${i},this.value)"></label><div class="eblock-list">${blocks}</div><div class="eblock-add"><button type="button" class="secondary" onclick="addBlock(${i},'text')">+ Текст</button><button type="button" class="secondary" onclick="pickSectionImage(${i})">+ Картинка</button><button type="button" class="secondary" onclick="addBlock(${i},'video')">+ Видео</button></div></div>`;
  }).join('');
 }
-function drawImages(){$('#image-editor').innerHTML=editorImages.map((im,i)=>`<div class="card"><img src="${im.data}" alt="" style="max-width:230px;max-height:180px"><label>Подпись<input data-caption="${i}" value="${escapeHTML(im.caption)}"></label><button type="button" class="secondary" onclick="removeImage(${i})">Удалить изображение</button></div>`).join('');document.querySelectorAll('[data-caption]').forEach(el=>el.oninput=()=>{editorImages[Number(el.dataset.caption)].caption=el.value;editorDirty=true})}
+function drawImages(){const preview=im=>/^(images\/|graphics\/|https:\/\/)/.test(im.data||'')?`<img src="${escapeHTML(im.data)}" alt="" style="max-width:230px;max-height:180px" onerror="this.style.display='none'">`:'';$('#image-editor').innerHTML=editorImages.map((im,i)=>`<div class="card">${preview(im)}<label>Путь к файлу<input data-src="${i}" value="${escapeHTML(im.data||'')}" placeholder="images/фото.jpg"></label><label>Подпись<input data-caption="${i}" value="${escapeHTML(im.caption)}"></label><button type="button" class="secondary" onclick="removeImage(${i})">Удалить изображение</button></div>`).join('');document.querySelectorAll('[data-src]').forEach(el=>el.oninput=()=>{editorImages[Number(el.dataset.src)].data=el.value.trim();editorDirty=true});document.querySelectorAll('[data-caption]').forEach(el=>el.oninput=()=>{editorImages[Number(el.dataset.caption)].caption=el.value;editorDirty=true})}
 function removeImage(i){editorImages.splice(i,1);editorDirty=true;drawImages()}
-async function addImage(e){const f=e.target.files[0];if(!f)return;if(!['image/png','image/jpeg','image/webp'].includes(f.type)||f.size>3*1024*1024){alert('Нужен PNG, JPEG или WebP не больше 3 МБ.');return}if(editorImages.length>=30){alert('Не больше 30 изображений в главе.');return}try{const data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(f)});editorImages.push({data,caption:f.name});editorDirty=true;drawImages()}catch(e){alert('Не удалось прочитать изображение.')}}
+function addImageEntry(){if(editorImages.length>=30){alert('Не больше 30 изображений в главе.');return}editorImages.push({data:'',caption:''});editorDirty=true;drawImages()}
 function saveChapter(){
  const form=$('#editor-form');if(!form.reportValidity())return false;
  try{
  const rows=$('#etable').value.split('\n').filter(x=>x.trim()).map(r=>r.split('|').map(x=>x.trim()));
  if(!rows.length||rows.some(r=>r.length!==rows[0].length))throw Error('В таблице должно быть одинаковое число столбцов в каждой строке.');
  const links=$('#elinks').value.split('\n').filter(x=>x.trim()).map(r=>{const p=r.indexOf('|');if(p<1)throw Error('Ссылка: название | https://адрес');return [r.slice(0,p).trim(),r.slice(p+1).trim()]});
- const prev=modules[editorIndex];const m={title:$('#etitle').value.trim(),hours:Number($('#ehours').value),goal:$('#egoal').value,sections:editorSections.map(serializeSection),table:rows,task:$('#etask').value,answer:$('#eanswer').value,checks:$('#echecks').value.split('\n').filter(x=>x.trim()),links,images:editorImages};if(prev.origin!==undefined)m.origin=prev.origin;if(prev.graphic)m.graphic=prev.graphic;
+ const prev=modules[editorIndex];const m={title:$('#etitle').value.trim(),hours:Number($('#ehours').value),goal:$('#egoal').value,sections:editorSections.map(serializeSection),table:rows,task:$('#etask').value,answer:$('#eanswer').value,checks:$('#echecks').value.split('\n').filter(x=>x.trim()),links,images:editorImages.filter(im=>String(im.data||'').trim())};if(prev.origin!==undefined)m.origin=prev.origin;if(prev.graphic)m.graphic=prev.graphic;
  validateBook({format:'armatura-book-v4',modules:[m]});modules[editorIndex]=JSON.parse(JSON.stringify(m));const stored=persistContent();editorDirty=false;
  // Content changes invalidate self-assessment for the edited chapter.
  state.done=state.done.filter(i=>i!==editorIndex);state.best=null;save();

@@ -226,15 +226,24 @@ button.secondary{background:#e9eefa;color:#284aa2}
       }
     }
 
-    // 5d. Функции синхронизации прогресса ученика. Их отсутствие — причина,
-    // по которой ученик «прошёл» главы, а у администратора статистика по нулям.
+    // 5d. Функции синхронизации прогресса ученика. Отсутствие любой из них —
+    // причина, по которой ученик «прошёл» главы, а у администратора статистика
+    // по нулям. Функции с аргументами вызываем с корректными именами параметров
+    // и заведомо недопустимым процентом (−1): так проверяется наличие функции,
+    // но прогресс в базу не пишется. Пустое тело { } для них дало бы ложное
+    // «PGRST202 — function not found» (ищется функция без аргументов).
     say('Проверяю функции прогресса…');
-    for (const fn of ['my_progress', 'my_quiz_best', 'save_my_progress', 'save_my_quiz']) {
+    for (const [fn, body] of [
+      ['my_progress', {}],
+      ['my_quiz_best', {}],
+      ['save_my_progress', { p_slug: '01', p_percent: -1 }],
+      ['save_my_quiz', { p_percent: -1 }],
+    ]) {
       try {
         const res = await timeout(fetch(APP_CONFIG.supabaseUrl + '/rest/v1/rpc/' + fn, {
           method: 'POST',
           headers: { apikey: APP_CONFIG.supabaseAnonKey, Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-          body: '{}',
+          body: JSON.stringify(body),
         }), 8000, 'RPC ' + fn);
         const text = await res.text();
         const missing = /PGRST202|Could not find the function/i.test(text);

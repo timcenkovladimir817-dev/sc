@@ -10,7 +10,7 @@
 | Файл / компонент | Назначение |
 |---|---|
 | `supabase/migrations/0001_init.sql` | Таблицы, роли, RLS, ссылки на прогресс |
-| `supabase/migrations/0002_seed_course.sql` | Курс и 16 модулей |
+| `supabase/migrations/0002_seed_course.sql` | Курс и 16 модулей (главы 17–20 добавляет `0010_kma_modules.sql`) |
 | `supabase/migrations/0003_security.sql` | Ужесточение RLS, запрет менять себе роль и блокировку |
 | `supabase/migrations/0004_admin_tools.sql` | Смена роли, отзыв приглашения, удаление, журнал действий, роль «наставник» |
 | `supabase/migrations/0005_progress_sync.sql` | Синхронизация прогресса ученика, заметки к модулям, напоминания |
@@ -18,6 +18,7 @@
 | `supabase/migrations/0007_module_assignment.sql` | Назначение курса и отдельных глав (блоков), пересчёт прогресса по назначенным главам |
 | `supabase/migrations/0008_student_statistics.sql` | Результат итогового теста, дата начала и последней активности ученика, страница статистики |
 | `supabase/migrations/0009_fix_progress_link.sql` | Исправление create_progress_link: токен через gen_random_uuid() вместо pgcrypto |
+| `supabase/migrations/0010_kma_modules.sql` | Главы 17–20 по материалам презентаций: присоединения, опросный лист, классификация, приводы |
 | `supabase/bootstrap-admin.sql` | Первый администратор (выполняется один раз вручную) |
 | `supabase/functions/invite-user` | Приглашение, Bitrix24, письмо, ссылка на прогресс |
 | `supabase/functions/resend-invite` | Повторное письмо для непринятого приглашения |
@@ -69,13 +70,15 @@ on conflict (id) do update set role = 'admin', is_blocked = false;
 0007_module_assignment.sql
 0008_student_statistics.sql
 0009_fix_progress_link.sql
+0010_kma_modules.sql
 ```
 
 Если таблицы и функции уже есть, выполните `0004_admin_tools.sql`, `0005_progress_sync.sql`,
-`0006_staff_access.sql`, `0007_module_assignment.sql`, `0008_student_statistics.sql`
-и `0009_fix_progress_link.sql`:
+`0006_staff_access.sql`, `0007_module_assignment.sql`, `0008_student_statistics.sql`,
+`0009_fix_progress_link.sql` и `0010_kma_modules.sql`:
 они добавляют кнопки управления, синхронизацию прогресса, доступ наставника, назначение глав,
-статистику по ученикам и исправляют выдачу ссылок на прогресс (без зависимости от pgcrypto).
+статистику по ученикам, исправляют выдачу ссылок на прогресс (без зависимости от pgcrypto)
+и регистрируют главы 17–20.
 
 ## 3. Настройки Authentication
 

@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 460" font-family="Arial, Helvetica, sans-serif">
+  <rect width="860" height="460" fill="#ffffff"/>
+  <text x="24" y="30" font-size="16" font-weight="700" fill="#15243e">Фланцевое соединение: сила болтов, прокладка и поверхность</text>
+  <text x="24" y="50" font-size="12" fill="#5b6b82">Герметичность — это не «затянуть сильнее», а создать предусмотренное контактное давление на всей поверхности</text>
+
+  <!-- flanges -->
+  <rect x="120" y="100" width="60" height="170" fill="#cbd5e1" stroke="#334155" stroke-width="2"/>
+  <rect x="300" y="100" width="60" height="170" fill="#cbd5e1" stroke="#334155" stroke-width="2"/>
+  <rect x="180" y="170" width="120" height="30" fill="#fde68a" stroke="#b45309" stroke-width="2"/>
+  <text x="240" y="190" font-size="11" text-anchor="middle" fill="#7c4a03">прокладка</text>
+
+  <line x1="150" y1="90" x2="150" y2="280" stroke="#334155" stroke-width="7"/>
+  <line x1="330" y1="90" x2="330" y2="280" stroke="#334155" stroke-width="7"/>
+  <text x="70" y="86" font-size="11" fill="#334155">болт</text>
+  <text x="300" y="86" font-size="11" fill="#334155">болт</text>
+
+  <g stroke="#dc2626" stroke-width="2" fill="#dc2626">
+    <line x1="150" y1="270" x2="150" y2="210"/><polygon points="144,214 150,204 156,214"/>
+    <line x1="330" y1="270" x2="330" y2="210"/><polygon points="324,214 330,204 336,214"/>
+  </g>
+  <text x="240" y="300" font-size="11" text-anchor="middle" fill="#991b1b">усилие затяжки сжимает прокладку</text>
+
+  <g stroke="#315de0" stroke-width="2" fill="#315de0">
+    <line x1="200" y1="150" x2="240" y2="150"/><polygon points="236,144 244,150 236,156"/>
+    <line x1="280" y1="150" x2="240" y2="150"/><polygon points="244,144 236,150 244,156"/>
+  </g>
+  <text x="240" y="140" font-size="11" text-anchor="middle" fill="#1e3a8a">среда давит на прокладку</text>
+
+  <!-- notes -->
+  <rect x="430" y="90" width="400" height="190" rx="10" fill="#f8fafc" stroke="#dbe3ef"/>
+  <text x="450" y="118" font-size="13" font-weight="700" fill="#15243e">Что проверить до сборки</text>
+  <g font-size="12" fill="#334155">
+    <text x="450" y="144">• тип и размеры фланцев, PN и исполнение поверхностей;</text>
+    <text x="450" y="166">• материал и размер прокладки, её пригодность для среды;</text>
+    <text x="450" y="188">• чистота, отсутствие забоин, рисок и старой прокладки;</text>
+    <text x="450" y="210">• соосность, отсутствие перекоса и натяга труб;</text>
+    <text x="450" y="232">• схема затяжки и момент по руководству;</text>
+    <text x="450" y="254">• повторная протяжка после температурного цикла — если предписана.</text>
+  </g>
+
+  <rect x="430" y="300" width="400" height="110" rx="10" fill="#fff7ed" stroke="#d97706"/>
+  <text x="450" y="326" font-size="13" font-weight="700" fill="#9a5b00">Почему течёт повторно</text>
+  <g font-size="12" fill="#7c4a03">
+    <text x="450" y="350">• прокладка не та или повреждена при сборке;</text>
+    <text x="450" y="370">• поверхность с риской, коррозией или перекосом;</text>
+    <text x="450" y="390">• затяжка неравномерная или момент не выдержан.</text>
+  </g>
+
+  <text x="24" y="440" font-size="11" fill="#5b6b82">Нельзя компенсировать неверную прокладку или дефект поверхности безмерным увеличением момента.</text>
+</svg>

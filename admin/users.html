@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Пользователи — АРМАТУРА / PRO</title>
+<link rel="stylesheet" href="../css/style.css">
+<script src="../js/theme.js"></script>
+</head>
+<body><div class="layout solo"><main id="app"><p>Проверка доступа…</p></main></div>
+<script src="../js/config.js"></script>
+<script src="../js/vendor/supabase.js"></script>
+<script src="../js/supabase-client.js"></script>
+<script src="../js/admin-nav.js"></script>
+<script>
+(async () => {
+  'use strict';
+
+  const staff = await requireStaff();
+  if (!staff) return;
+
+  const app = document.querySelector('#app');
+  const me = staff.profile;
+  const isAdmin = me.role === 'admin';
+  const site = String(APP_CONFIG.siteUrl || '').replace(/\/$/, '');
+  const state = { profiles: [], enrollments: [], courses: [], invitations: [] };
+
+  app.innerHTML = `
+    <div id="admin-nav"></div>
+    <div class="eyebrow">Администрирование обучения</div>
+    <h1>Пользователи и учётные записи</h1>
+    <p class="muted">Роли, блокировка входа, сброс пароля и ссылки на прогресс. Пароли сотрудников администратору недоступны: сброс идёт письмом.</p>
+
+    <div class="stat-grid" id="stats"></div>
+    <div class="notice" id="msg" role="status" hidden></div>
+
+    <div class="card">
+      <div class="toolbar">
+        <input id="q" type="search" placeholder="Поиск: ФИО, email, должность, подразделение" autocomplete="off">
+        <select id="filter" aria-label="Фильтр пользователей">
+          <option value="all">Все пользователи</option>
+          <option value="admins">Администраторы</option>
+          <option value="staff">Сотрудники</option>
+          <option value="blocked">Заблокированные</option>
+          <option value="unassigned">Без назначения курса</option>
+        </select>
+        <button type="button" class="secondary" id="export">Экспорт CSV</button>
+        ${isAdmin ? `<button type="button" class="secondary" id="remind-all">Напомнить о сроках</button>` : ''}
+        <button type="button" class="secondary" id="refresh">Обновить</button>
+        <a class="button-link" href="index.html#invite">Пригласить сотрудника</a>
+      </div>
+      <div id="users"><p class="muted">Загрузка…</p></div>
+    </div>
+
+    <div class="card">
+      <h2>Приглашения</h2>
+      <p class="muted">Повторное письмо работает только для ожидающих приглашений. Отзыв закрывает доступ по старой ссылке.</p>
+      <div id="invites"><p class="muted">Загрузка…</p></div>
+    </div>
+
+    <details class="card">
+      <summary>Если кнопки не работают: что выполнить в Supabase</summary>
+      <p>Для смены роли, отзыва приглашения и удаления пользователя нужны функции из файла
+        <code>supabase/migrations/0004_admin_tools.sql</code>. Откройте Supabase → SQL Editor и выполните этот файл целиком.</p>
+      <p>Первый администратор создаётся один раз вручную: Authentication → Users → Add user, затем
+        <code>supabase/bootstrap-admin.sql</code> с вашим email.</p>
+      <pre class="sql-block">-- Проверить, кто администратор
+select id, email, full_name, role, is_blocked
+from public.profiles
+where role::text = 'admin'
+order by created_at;
+
+-- Выдать роль вручную, если интерфейс недоступен
+update public.profiles
+set role = 'admin', is_blocked = false
+where lower(email) = lower('admin@example.com')
+returning id, email, role;</pre>
+      <p><a href="diag.html">Открыть диагностику доступа</a></p>
+    </details>
+  `;
+
+  const msg = document.querySelector('#msg');
+  const usersBox = document.querySelector('#users');
+  const invitesBox = document.querySelector('#invites');
+
+  function notify(html, kind) {
+    msg.className = 'notice' + (kind ? ' ' + kind : '');
+    msg.innerHTML = html;
+    msg.hidden = false;
+    msg.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function clearMsg() { msg.hidden = true; msg.innerHTML = ''; }
+
+  function escText(value) { return esc(value); }
+
+  const roleNames = { admin: 'Администратор', teacher: 'Наставник', student: 'Сотрудник' };
+  const statusNames = {
+    assigned: 'Назначено', in_progress: 'В работе', completed: 'Завершено', cancelled: 'Отменено',
+  };
+  const inviteNames = { pending: 'Ожидает входа', accepted: 'Принято', revoked: 'Отозвано' };
+
+  function roleName(role) { return roleNames[role] || role || 'Не задана'; }
+
+  function fmtDate(value) {
+    if (!value) return '—';
+    const date = new Date(value.length === 10 ? value + 'T00:00:00' : value);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString('ru-RU');
+  }
+
+  function todayStart() {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    return date;
+  }
+
+  function isOverdue(enrollment) {
+    if (!enrollment || !enrollment.due_date) return false;
+    if (enrollment.status === 'completed' || enrollment.status === 'cancelled') return false;
+    return new Date(enrollment.due_date + 'T00:00:00') < todayStart();
+  }
+
+  function courseName(id) {
+    const course = state.courses.find((item) => item.id === id);
+    return course ? (course.title || course.slug || 'Курс') : 'Курс';
+  }
+
+  function enrollmentsFor(userId) {
+    return state.enrollments.filter((item) => item.user_id === userId);
+  }
+
+  function primaryEnrollment(userId) {
+    const list = enrollmentsFor(userId);
+    if (!list.length) return null;
+    return list.find((item) => item.status !== 'cancelled') || list[0];
+  }
+
+  function roleOptions(current) {
+    const options = [['student', 'Сотрудник'], ['teacher', 'Наставник'], ['admin', 'Администратор']];
+    if (current && !options.some(([value]) => value === current)) options.push([current, current]);
+    return options.map(([value, label]) =>
+      `<option value="${escText(value)}"${value === current ? ' selected' : ''}>${escText(label)}</option>`).join('');
+  }
+
+  function progressBar(percent) {
+    const value = Math.max(0, Math.min(100, Number(percent) || 0));
+    return `<div class="progress-mini" title="Прогресс ${value}%"><span style="width:${value}%"></span></div>`;
+  }
+
+  function statusBadge(status) {
+    const cls = status === 'completed' ? 'ok' : status === 'in_progress' ? 'warn'
+      : status === 'cancelled' ? 'muted' : '';
+    return `<span class="badge ${cls}">${escText(statusNames[status] || status || '—')}</span>`;
+  }
+
+  async function selectAll(table, order) {
+    let result = order
+      ? await sb.from(table).select('*').order(order, { ascending: false })
+      : await sb.from(table).select('*');
+    // На случай другой версии схемы: повторяем без сортировки, если колонки нет.
+    if (result.error && order) result = await sb.from(table).select('*');
+    return result;
+  }
+
+  async function load() {
+    clearMsg();
+    usersBox.innerHTML = '<p class="muted">Загрузка пользователей…</p>';
+    invitesBox.innerHTML = '<p class="muted">Загрузка приглашений…</p>';
+
+    const [profiles, enrollments, courses, invitations] = await Promise.all([
+      selectAll('profiles', 'created_at'),
+      selectAll('enrollments', 'created_at'),
+      selectAll('courses', null),
+      isAdmin ? selectAll('invitations', 'created_at') : Promise.resolve({ data: [], error: null }),
+    ]);
+
+    if (profiles.error) {
+      state.profiles = [];
+      usersBox.innerHTML = `<div class="notice err">
+        Не удалось прочитать профили: ${escText(profiles.error.message)}<br>
+        <small>Проверьте, что вы вошли как администратор и что применены миграции 0001 и 0003.
+        <a href="diag.html">Диагностика</a></small></div>`;
+      return;
+    }
+
+    state.profiles = profiles.data || [];
+    state.enrollments = enrollments.error ? [] : (enrollments.data || []);
+    state.courses = courses.error ? [] : (courses.data || []);
+    state.invitations = invitations.error ? [] : (invitations.data || []);
+
+    renderStats();
+    renderUsers();
+    renderInvitations();
+
+    if (enrollments.error) {
+      notify('Назначения курсов не загрузились: ' + escText(enrollments.error.message), 'err');
+    }
+    if (invitations.error) {
+      invitesBox.innerHTML = `<div class="notice err">Приглашения не загрузились: ${escText(invitations.error.message)}</div>`;
+    }
+  }
+
+  function renderStats() {
+    const total = state.profiles.length;
+    const admins = state.profiles.filter((item) => item.role === 'admin').length;
+    const blocked = state.profiles.filter((item) => item.is_blocked).length;
+    const active = state.enrollments.filter((item) => item.status !== 'cancelled');
+    const completed = active.filter((item) => item.status === 'completed').length;
+    const avg = active.length
+      ? Math.round(active.reduce((sum, item) => sum + (Number(item.progress) || 0), 0) / active.length)
+      : 0;
+    const overdue = active.filter(isOverdue).length;
+    const pending = state.invitations.filter((item) => item.status === 'pending').length;
+
+    const cards = [
+      ['Пользователи', total, admins + ' админ.', ''],
+      ['Заблокированы', blocked, blocked ? 'вход запрещён' : 'нет блокировок', blocked ? 'bad' : 'ok'],
+      ['Назначений', active.length, completed + ' завершено', ''],
+      ['Средний прогресс', avg + '%', 'по активным назначениям', avg >= 80 ? 'ok' : avg >= 40 ? 'warn' : ''],
+      ['Просрочено', overdue, 'срок прошёл', overdue ? 'bad' : 'ok'],
+      ['Приглашений', pending, 'ожидают входа', pending ? 'warn' : ''],
+    ];
+
+    document.querySelector('#stats').innerHTML = cards.map(([label, value, hint, cls]) =>
+      `<div class="stat-card ${cls}"><span class="stat-label">${escText(label)}</span>
+        <b class="stat-value">${escText(value)}</b><span class="stat-hint">${escText(hint)}</span></div>`).join('');
+  }
+
+  function renderUsers() {
+    const query = document.querySelector('#q').value.trim().toLowerCase();
+    const filter = document.querySelector('#filter').value;
+
+    let list = state.profiles.slice();
+
+    if (filter === 'admins') list = list.filter((item) => item.role === 'admin');
+    if (filter === 'staff') list = list.filter((item) => item.role !== 'admin');
+    if (filter === 'blocked') list = list.filter((item) => item.is_blocked);
+    if (filter === 'unassigned') list = list.filter((item) => !primaryEnrollment(item.id));
+
+    if (query) {
+      list = list.filter((item) => [item.full_name, item.email, item.position, item.department]
+        .filter(Boolean).join(' ').toLowerCase().includes(query));
+    }
+
+    list.sort((a, b) => {
+      if ((a.role === 'admin') !== (b.role === 'admin')) return a.role === 'admin' ? -1 : 1;
+      return String(a.full_name || a.email || '').localeCompare(String(b.full_name || b.email || ''), 'ru');
+    });
+
+    if (!list.length) {
+      usersBox.innerHTML = `<div class="empty">Ничего не найдено.
+        ${state.profiles.length ? 'Измените запрос или фильтр.' : 'Пригласите первого сотрудника.'}</div>`;
+      return;
+    }
+
+    usersBox.innerHTML = `<div class="tablewrap responsive-wrap"><table class="responsive">
+      <thead><tr>
+        <th>Сотрудник</th><th>Роль</th><th>Курс</th><th>Доступ</th><th>Действия</th>
+      </tr></thead><tbody>
+      ${list.map((user) => {
+        const enrollment = primaryEnrollment(user.id);
+        const self = user.id === me.id;
+        const blocked = Boolean(user.is_blocked);
+        const sub = [user.position, user.department].filter(Boolean).join(' · ');
+
+        return `<tr>
+          <td data-label="Сотрудник">
+            <div class="user-name">${escText(user.full_name || 'Без имени')}${self ? ' <span class="badge muted">это вы</span>' : ''}</div>
+            <div class="user-sub">${escText(user.email || '—')}</div>
+            ${sub ? `<div class="user-sub">${escText(sub)}</div>` : ''}
+            <div class="user-sub">с ${fmtDate(user.created_at)}</div>
+          </td>
+          <td data-label="Роль">
+            ${isAdmin
+              ? `<select class="role-select" data-role="${escText(user.id)}"
+                ${self ? 'disabled title="Нельзя менять собственную роль"' : 'aria-label="Роль сотрудника"'}>
+                ${roleOptions(user.role || 'student')}
+              </select>`
+              : `<span class="badge ${user.role === 'admin' ? '' : 'muted'}">${escText(roleName(user.role))}</span>`}
+          </td>
+          <td data-label="Курс">
+            ${enrollment ? `
+              <div class="user-name">${escText(courseName(enrollment.course_id))}</div>
+              ${progressBar(enrollment.progress)}
+              <div class="user-sub">${escText(enrollment.progress || 0)}% · ${statusBadge(enrollment.status)}
+                ${enrollment.due_date ? ` · срок ${fmtDate(enrollment.due_date)}` : ''}
+                ${isOverdue(enrollment) ? ' <span class="badge bad">просрочено</span>' : ''}</div>
+            ` : '<span class="badge muted">не назначен</span>'}
+          </td>
+          <td data-label="Доступ">${blocked
+            ? '<span class="badge bad">Заблокирован</span>'
+            : '<span class="badge ok">Активен</span>'}</td>
+          <td data-label="Действия">
+            <div class="row-actions">
+              ${self ? '<span class="user-sub">Управление собой недоступно</span>' : isAdmin ? `
+                <button type="button" class="small secondary" data-block="${escText(user.id)}"
+                  title="${blocked ? 'Разблокировать вход' : 'Заблокировать вход'}">${blocked ? 'Разблок.' : 'Блок'}</button>
+                <button type="button" class="small secondary" data-reset="${escText(user.id)}"
+                  title="Отправить письмо для смены пароля">Пароль</button>
+                ${enrollment && enrollment.status !== 'completed' && enrollment.status !== 'cancelled' && enrollment.due_date
+                  ? `<button type="button" class="small secondary" data-remind="${escText(enrollment.id)}"
+                    title="Отправить напоминание о сроке по email">Срок</button>` : ''}
+                ${enrollment ? `<button type="button" class="small secondary" data-progress="${escText(enrollment.id)}"
+                  title="Создать ссылку на прогресс на 365 дней">Прогресс</button>` : ''}
+                <button type="button" class="small danger" data-delete="${escText(user.id)}"
+                  title="Удалить учётную запись полностью">Удалить</button>
+              ` : (enrollment ? `<button type="button" class="small secondary" data-progress="${escText(enrollment.id)}"
+                  title="Создать ссылку на прогресс на 365 дней">Прогресс</button>` : '<span class="user-sub">—</span>')}
+            </div>
+          </td>
+        </tr>`;
+      }).join('')}
+      </tbody></table></div>
+      <p class="muted small">Показано ${list.length} из ${state.profiles.length}. «Пароль» отправляет сотруднику письмо со ссылкой на /reset.html.</p>`;
+  }
+
+  function renderInvitations() {
+    if (!isAdmin) {
+      invitesBox.innerHTML = '<p class="muted">Управление приглашениями доступно администратору обучения.</p>';
+      return;
+    }
+    const list = state.invitations.slice(0, 100);
+    if (!list.length) {
+      invitesBox.innerHTML = '<div class="empty">Приглашений пока нет. <a href="index.html#invite">Пригласить сотрудника</a></div>';
+      return;
+    }
+
+    invitesBox.innerHTML = `<div class="tablewrap responsive-wrap"><table class="responsive">
+      <thead><tr><th>Сотрудник</th><th>Создано</th><th>Срок</th><th>Статус</th><th>Bitrix24</th><th>Действия</th></tr></thead>
+      <tbody>${list.map((invite) => {
+        const pending = invite.status === 'pending';
+        const badge = invite.status === 'accepted' ? 'ok' : invite.status === 'pending' ? 'warn' : 'muted';
+        return `<tr>
+          <td data-label="Сотрудник">
+            <div class="user-name">${escText(invite.full_name || 'Без имени')}</div>
+            <div class="user-sub">${escText(invite.email || '—')}</div>
+          </td>
+          <td data-label="Создано">${fmtDate(invite.created_at)}</td>
+          <td data-label="Срок">${fmtDate(invite.due_date)}</td>
+          <td data-label="Статус"><span class="badge ${badge}">${escText(inviteNames[invite.status] || invite.status || '—')}</span></td>
+          <td data-label="Bitrix24">${invite.bitrix_task_id
+            ? `№ ${escText(invite.bitrix_task_id)}`
+            : invite.bitrix_error
+              ? `<span class="badge bad" title="${escText(invite.bitrix_error)}">ошибка</span>`
+              : '—'}</td>
+          <td data-label="Действия"><div class="row-actions">
+            ${pending ? `<button type="button" class="small secondary" data-resend="${escText(invite.id)}"
+                title="Отправить приглашение повторно">Письмо</button>
+              <button type="button" class="small danger" data-revoke="${escText(invite.id)}"
+                title="Отозвать приглашение">Отозвать</button>` : ''}
+            ${invite.enrollment_id ? `<button type="button" class="small secondary" data-progress="${escText(invite.enrollment_id)}"
+                title="Создать ссылку на прогресс">Прогресс</button>` : ''}
+            ${!pending && !invite.enrollment_id ? '<span class="user-sub">—</span>' : ''}
+          </div></td>
+        </tr>`;
+      }).join('')}</tbody></table></div>`;
+  }
+
+  async function setRole(userId, role) {
+    // Сначала обычный UPDATE: он работает, если в базе нет ограничений на колонку role.
+    const direct = await sb.from('profiles').update({ role }).eq('id', userId).select('id');
+    if (!direct.error && Array.isArray(direct.data) && direct.data.length) return;
+    // Затем функция 0004 — обходит ограничения грантов и проверяет последнего администратора.
+    const rpc = await sb.rpc('admin_set_role', { p_user: userId, p_role: role });
+    if (rpc.error) {
+      const hint = rpc.error.code === 'PGRST202' || /could not find the function/i.test(rpc.error.message)
+        ? ' Выполните supabase/migrations/0004_admin_tools.sql в SQL Editor.'
+        : '';
+      throw new Error(rpc.error.message + hint);
+    }
+  }
+
+  async function revokeInvitation(invitationId) {
+    const direct = await sb.from('invitations')
+      .update({ status: 'revoked', revoked_at: new Date().toISOString() })
+      .eq('id', invitationId).select('id');
+    if (!direct.error && Array.isArray(direct.data) && direct.data.length) return;
+    const rpc = await sb.rpc('admin_revoke_invitation', { p_invitation: invitationId });
+    if (rpc.error) {
+      const hint = rpc.error.code === 'PGRST202' || /could not find the function/i.test(rpc.error.message)
+        ? ' Выполните supabase/migrations/0004_admin_tools.sql в SQL Editor.'
+        : '';
+      throw new Error(rpc.error.message + hint);
+    }
+  }
+
+  async function sendProgressLink(enrollmentId) {
+    const { data, error } = await sb.rpc('create_progress_link', { p_enrollment: enrollmentId, p_days: 365 });
+    if (error) throw new Error(error.message);
+    const url = `${site}/progress.html?token=${encodeURIComponent(data)}`;
+    try { await navigator.clipboard.writeText(url); } catch (error) { /* буфер может быть запрещён */ }
+    notify(`Ссылка на прогресс действует 365 дней и скопирована в буфер обмена:<br>
+      <a href="${escText(url)}" target="_blank" rel="noopener">${escText(url)}</a>`, 'ok');
+  }
+
+  // Запись в журнал действий администратора. Ошибки журнала не ломают операцию.
+  async function logAction(action, target, details) {
+    try { await sb.rpc('admin_log_action', { p_action: action, p_target: target, p_details: details || {} }); }
+    catch (error) { /* журнал недоступен — игнорируем */ }
+  }
+
+  async function sendReminder(enrollmentId) {
+    const data = await callFunction('send-reminders', { enrollmentId });
+    return data;
+  }
+
+  function exportCsv() {
+    const q = document.querySelector('#q').value.trim().toLowerCase();
+    const filter = document.querySelector('#filter').value;
+    let list = state.profiles.slice();
+    if (filter === 'admins') list = list.filter((item) => item.role === 'admin');
+    if (filter === 'staff') list = list.filter((item) => item.role !== 'admin');
+    if (filter === 'blocked') list = list.filter((item) => item.is_blocked);
+    if (filter === 'unassigned') list = list.filter((item) => !primaryEnrollment(item.id));
+    if (q) list = list.filter((item) => [item.full_name, item.email, item.position, item.department].filter(Boolean).join(' ').toLowerCase().includes(q));
+    list.sort((a, b) => String(a.full_name || a.email || '').localeCompare(String(b.full_name || b.email || ''), 'ru'));
+
+    const header = ['ФИО', 'Email', 'Роль', 'Должность', 'Подразделение', 'Доступ', 'Курс', 'Прогресс, %', 'Статус', 'Срок'];
+    const rows = list.map((user) => {
+      const enrollment = primaryEnrollment(user.id);
+      return [
+        user.full_name || '',
+        user.email || '',
+        roleName(user.role),
+        user.position || '',
+        user.department || '',
+        user.is_blocked ? 'Заблокирован' : 'Активен',
+        enrollment ? courseName(enrollment.course_id) : 'не назначен',
+        enrollment ? String(enrollment.progress || 0) : '',
+        enrollment ? (statusNames[enrollment.status] || enrollment.status || '') : '',
+        enrollment && enrollment.due_date ? enrollment.due_date : '',
+      ];
+    });
+
+    const quote = (value) => '"' + String(value ?? '').replace(/"/g, '""') + '"';
+    const csv = [header, ...rows].map((row) => row.map(quote).join(';')).join('\r\n');
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'users-progress.csv';
+    link.click();
+    URL.revokeObjectURL(link.href);
+    notify(`Выгружено строк: ${list.length}. Файл users-progress.csv открывается в Excel (разделитель «;»).`, 'ok');
+  }
+
+  // Делегирование: таблицы перерисовываются, обработчики остаются на контейнерах.
+  usersBox.addEventListener('click', async (event) => {
+    const button = event.target.closest('button[data-block],button[data-reset],button[data-progress],button[data-delete],button[data-remind]');
+    if (!button) return;
+
+    if (button.dataset.remind) {
+      button.disabled = true;
+      try {
+        const result = await sendReminder(button.dataset.remind);
+        notify(`Напоминание о сроке отправлено (писем: ${result.sent}).`, 'ok');
+      } catch (error) {
+        notify('Напоминание не отправлено: ' + escText(error.message), 'err');
+        button.disabled = false;
+      }
+      return;
+    }
+
+    const user = state.profiles.find((item) => item.id === (button.dataset.block || button.dataset.reset || button.dataset.delete));
+
+    if (button.dataset.block) {
+      const blocked = !user.is_blocked;
+      if (!confirm(`${blocked ? 'Заблокировать' : 'Разблокировать'} ${user.full_name || user.email}?\n\n`
+        + (blocked ? 'Вход и чтение данных будут запрещены.' : 'Доступ снова откроется.'))) return;
+      button.disabled = true;
+      try {
+        await callFunction('block-user', { userId: user.id, blocked });
+        await logAction(blocked ? 'user_blocked' : 'user_unblocked', 'profile', { userId: user.id, email: user.email });
+        await load();
+        notify(`${blocked ? 'Заблокирован' : 'Разблокирован'}: <b>${escText(user.email || user.full_name)}</b>`, 'ok');
+      } catch (error) {
+        notify('Не удалось изменить блокировку: ' + escText(error.message), 'err');
+        button.disabled = false;
+      }
+      return;
+    }
+
+    if (button.dataset.reset) {
+      if (!user.email) { notify('У пользователя не заполнен email.', 'err'); return; }
+      button.disabled = true;
+      const { error } = await sb.auth.resetPasswordForEmail(user.email, { redirectTo: `${site}/reset.html` });
+      button.disabled = false;
+      if (error) notify('Письмо не отправлено: ' + escText(error.message), 'err');
+      else {
+        await logAction('password_reset_sent', 'profile', { userId: user.id, email: user.email });
+        notify(`Письмо для смены пароля отправлено на <b>${escText(user.email)}</b>.`, 'ok');
+      }
+      return;
+    }
+
+    if (button.dataset.progress) {
+      button.disabled = true;
+      try {
+        await sendProgressLink(button.dataset.progress);
+        await logAction('progress_link_created', 'enrollment', { enrollmentId: button.dataset.progress });
+      }
+      catch (error) { notify('Ссылка не создана: ' + escText(error.message), 'err'); }
+      finally { button.disabled = false; }
+      return;
+    }
+
+    if (button.dataset.delete) {
+      const answer = prompt(`Удалить учётную запись ${user.email || user.full_name}?\n`
+        + 'Будут удалены профиль, назначения и прогресс. Действие необратимо.\n\n'
+        + 'Введите email сотрудника для подтверждения:');
+      if (answer === null) return;
+      if (answer.trim().toLowerCase() !== String(user.email || '').trim().toLowerCase()) {
+        notify('Удаление отменено: email не совпал.', 'err');
+        return;
+      }
+      button.disabled = true;
+      const { error } = await sb.rpc('admin_delete_user', { p_user: user.id });
+      if (error) {
+        const hint = error.code === 'PGRST202' || /could not find the function/i.test(error.message)
+          ? '<br><small>Выполните supabase/migrations/0004_admin_tools.sql в SQL Editor.</small>'
+          : '';
+        notify('Не удалось удалить: ' + escText(error.message) + hint, 'err');
+        button.disabled = false;
+        return;
+      }
+      await load();
+      notify(`Учётная запись <b>${escText(user.email || user.full_name)}</b> удалена.`, 'ok');
+    }  });
+
+  usersBox.addEventListener('change', async (event) => {
+    const select = event.target.closest('select[data-role]');
+    if (!select) return;
+    const user = state.profiles.find((item) => item.id === select.dataset.role);
+    if (!user) return;
+    const oldRole = user.role || 'student';
+    const newRole = select.value;
+    if (newRole === oldRole) return;
+    if (!confirm(`Назначить ${user.full_name || user.email} роль «${roleName(newRole)}»?`)) {
+      select.value = oldRole;
+      return;
+    }
+    select.disabled = true;
+    try {
+      await setRole(user.id, newRole);
+      await logAction('role_changed', 'profile', { userId: user.id, email: user.email, role: newRole, oldRole });
+      await load();
+      notify(`Роль обновлена: <b>${escText(user.email || user.full_name)}</b> → ${escText(roleName(newRole))}.`, 'ok');
+    } catch (error) {
+      select.value = oldRole;
+      select.disabled = false;
+      notify('Роль не изменена: ' + escText(error.message), 'err');
+    }
+  });
+
+  invitesBox.addEventListener('click', async (event) => {
+    const button = event.target.closest('button[data-resend],button[data-revoke],button[data-progress]');
+    if (!button) return;
+
+    if (button.dataset.resend) {
+      if (!confirm('Отправить приглашение повторно? Старое будет отозвано, придёт новое письмо.')) return;
+      button.disabled = true;
+      try {
+        await callFunction('resend-invite', { invitationId: button.dataset.resend });
+        await logAction('invitation_resent', 'invitation', { invitationId: button.dataset.resend });
+        await load();
+        notify('Приглашение отправлено повторно.', 'ok');
+      } catch (error) {
+        notify('Не отправлено: ' + escText(error.message), 'err');
+        button.disabled = false;
+      }
+      return;
+    }
+
+    if (button.dataset.revoke) {
+      if (!confirm('Отозвать приглашение? Ссылка из письма перестанет работать.')) return;
+      button.disabled = true;
+      try {
+        await revokeInvitation(button.dataset.revoke);
+        await load();
+        notify('Приглашение отозвано.', 'ok');
+      } catch (error) {
+        notify('Не отозвано: ' + escText(error.message), 'err');
+        button.disabled = false;
+      }
+      return;
+    }
+
+    if (button.dataset.progress) {
+      button.disabled = true;
+      try { await sendProgressLink(button.dataset.progress); }
+      catch (error) { notify('Ссылка не создана: ' + escText(error.message), 'err'); }
+      finally { button.disabled = false; }
+    }
+  });
+
+  document.querySelector('#refresh').addEventListener('click', load);
+  document.querySelector('#q').addEventListener('input', renderUsers);
+  document.querySelector('#filter').addEventListener('change', renderUsers);
+
+  document.querySelector('#export').addEventListener('click', exportCsv);
+  const remindAllBtn = document.querySelector('#remind-all');
+  if (remindAllBtn) {
+    remindAllBtn.addEventListener('click', async (event) => {
+      const button = event.currentTarget;
+      if (!confirm('Отправить напоминания всем, у кого срок прохождения в пределах 3 дней или уже прошёл?')) return;
+      button.disabled = true;
+      try {
+        const result = await callFunction('send-reminders', { days: 3 });
+        notify(`Напоминания отправлены: писем ${result.sent}, пропущено ${result.skipped}.`, 'ok');
+      } catch (error) {
+        notify('Не отправлено: ' + escText(error.message), 'err');
+      } finally {
+        button.disabled = false;
+      }
+    });
+  }
+
+  await load();
+})().catch((error) => {
+  const app = document.querySelector('#app');
+  if (app) {
+    app.innerHTML = `<div class="notice err">Страница пользователей не загрузилась: ${esc(error && error.message || error)}</div>
+      <p><a href="diag.html">Диагностика</a> · <a href="../index.html">Учебник</a></p>`;
+  }
+});
+</script>
+</body></html>

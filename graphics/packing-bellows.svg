@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 380" font-family="Arial, Helvetica, sans-serif">
+  <rect width="820" height="380" fill="#ffffff"/>
+  <text x="24" y="30" font-size="16" font-weight="700" fill="#15243e">Уплотнение штока: набивка и сильфон</text>
+  <text x="24" y="50" font-size="12" fill="#5b6b82">Набивка работает за счёт обжатия; сильфон отделяет среду гибкой оболочкой</text>
+
+  <!-- left panel -->
+  <rect x="24" y="72" width="370" height="260" rx="12" fill="#f8fafc" stroke="#dbe3ef"/>
+  <text x="209" y="98" font-size="14" font-weight="700" text-anchor="middle" fill="#15243e">Сальниковая набивка</text>
+  <rect x="155" y="120" width="108" height="150" rx="8" fill="#ffffff" stroke="#334155" stroke-width="2"/>
+  <rect x="195" y="105" width="28" height="180" fill="#cbd5e1" stroke="#334155" stroke-width="1.5"/>
+  <g fill="#fde68a" stroke="#b45309" stroke-width="1.2">
+    <rect x="165" y="145" width="88" height="16" rx="3"/>
+    <rect x="165" y="168" width="88" height="16" rx="3"/>
+    <rect x="165" y="191" width="88" height="16" rx="3"/>
+    <rect x="165" y="214" width="88" height="16" rx="3"/>
+  </g>
+  <rect x="150" y="116" width="118" height="14" rx="4" fill="#94a3b8" stroke="#334155"/>
+  <text x="209" y="138" font-size="10" text-anchor="middle" fill="#15243e">прижимная втулка</text>
+  <text x="209" y="250" font-size="10" text-anchor="middle" fill="#15243e">кольца набивки</text>
+  <line x1="209" y1="92" x2="209" y2="112" stroke="#dc2626" stroke-width="2"/>
+  <polygon points="203,108 209,118 215,108" fill="#dc2626"/>
+  <text x="209" y="290" font-size="11" text-anchor="middle" fill="#5b6b82">обжатие ↑ — трение ↑</text>
+
+  <!-- right panel -->
+  <rect x="426" y="72" width="370" height="260" rx="12" fill="#f8fafc" stroke="#dbe3ef"/>
+  <text x="611" y="98" font-size="14" font-weight="700" text-anchor="middle" fill="#15243e">Сильфонное уплотнение</text>
+  <rect x="557" y="120" width="108" height="150" rx="8" fill="#ffffff" stroke="#334155" stroke-width="2"/>
+  <rect x="597" y="105" width="28" height="180" fill="#cbd5e1" stroke="#334155" stroke-width="1.5"/>
+  <path d="M570 140 Q611 125 652 140 Q611 155 570 140 M570 165 Q611 150 652 165 Q611 180 570 165 M570 190 Q611 175 652 190 Q611 205 570 190 M570 215 Q611 200 652 215 Q611 230 570 215" fill="none" stroke="#315de0" stroke-width="2.5"/>
+  <text x="611" y="250" font-size="10" text-anchor="middle" fill="#15243e">гибкая металлическая оболочка</text>
+  <text x="611" y="290" font-size="11" text-anchor="middle" fill="#5b6b82">ресурс ограничен числом циклов</text>
+
+  <text x="24" y="360" font-size="11" fill="#5b6b82">Конкретные материалы, число колец, зазоры и моменты — по руководству изготовителя.</text>
+</svg>

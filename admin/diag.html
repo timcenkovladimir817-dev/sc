@@ -2,6 +2,7 @@
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Диагностика доступа — АРМАТУРА / PRO</title>
 <link rel="stylesheet" href="../css/style.css">
+<script src="../js/theme.js"></script>
 <style>
 table{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}
 th,td{padding:9px 10px;border-bottom:1px solid #dce4ef;text-align:left;vertical-align:top}
@@ -15,6 +16,7 @@ button.secondary{background:#e9eefa;color:#284aa2}
 .step{font-size:13px;color:#5b6b86;margin-top:10px}
 </style></head>
 <body><div class="layout solo"><main id="app">
+  <div id="admin-nav"></div>
   <div class="eyebrow">Диагностика</div>
   <h1>Почему не пускает в админку</h1>
   <div class="card"><table><tbody id="rows"></tbody></table>
@@ -30,6 +32,7 @@ button.secondary{background:#e9eefa;color:#284aa2}
 <script src="../js/config.js"></script>
 <script src="../js/vendor/supabase.js"></script>
 <script src="../js/supabase-client.js"></script>
+<script src="../js/admin-nav.js"></script>
 <script>
 (() => {
   'use strict';
@@ -171,7 +174,7 @@ button.secondary{background:#e9eefa;color:#284aa2}
 
     // 5. Функции политик
     say('Проверяю функции политик…');
-    for (const fn of ['is_admin', 'is_teacher', 'is_active_user']) {
+    for (const fn of ['is_admin', 'is_active_user']) {
       try {
         const r = await rest('rpc/' + fn, token);
         const value = r.status === 200 ? JSON.stringify(r.data) : 'HTTP ' + r.status + ': ' + JSON.stringify(r.data).slice(0, 200);
@@ -181,9 +184,51 @@ button.secondary{background:#e9eefa;color:#284aa2}
       }
     }
 
+    // 5b. Административные функции. Отсутствие admin_set_role не блокирует вход,
+    // но из-за него в разделе «Пользователи» не сработает смена роли.
+    say('Проверяю административные функции…');
+    for (const [fn, body] of [
+      ['admin_set_role', { p_user: '00000000-0000-0000-0000-000000000000', p_role: 'student' }],
+      ['admin_revoke_invitation', { p_invitation: '00000000-0000-0000-0000-000000000000' }],
+      ['admin_delete_user', { p_user: '00000000-0000-0000-0000-000000000000' }],
+      ['admin_log_action', { p_action: '', p_target: '', p_details: {} }],
+    ]) {
+      try {
+        const res = await timeout(fetch(APP_CONFIG.supabaseUrl + '/rest/v1/rpc/' + fn, {
+          method: 'POST',
+          headers: { apikey: APP_CONFIG.supabaseAnonKey, Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }), 8000, 'RPC ' + fn);
+        const text = await res.text();
+        const missing = /PGRST202|Could not find the function/i.test(text);
+        row('Функция ' + fn + '()', missing ? 'не установлена — выполните 0004_admin_tools.sql' : 'установлена',
+          missing ? 'warn' : 'ok');
+      } catch (e) {
+        row('Функция ' + fn + '()', 'ошибка: ' + e.message, 'bad');
+      }
+    }
+
+    // 5c. Edge Functions: без токена они отвечают 401, с токеном — ошибкой валидации.
+    say('Проверяю Edge Functions…');
+    for (const fn of ['invite-user', 'resend-invite', 'block-user', 'send-reminders']) {
+      try {
+        const res = await timeout(fetch(APP_CONFIG.supabaseUrl + '/functions/v1/' + fn, {
+          method: 'POST',
+          headers: { apikey: APP_CONFIG.supabaseAnonKey, Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+          body: '{}',
+        }), 8000, fn);
+        const text = await res.text();
+        const deployed = res.status !== 404 && !/not found/i.test(text);
+        row('Функция ' + fn, deployed ? 'развёрнута (HTTP ' + res.status + ')' : 'не найдена (HTTP 404)',
+          deployed ? 'ok' : 'bad');
+      } catch (e) {
+        row('Функция ' + fn, 'ошибка: ' + e.message, 'bad');
+      }
+    }
+
     // 6. Таблицы
     say('Проверяю таблицы…');
-    for (const t of ['courses', 'course_modules', 'module_blocks']) {
+    for (const t of ['profiles', 'courses', 'course_modules', 'enrollments', 'module_progress', 'invitations', 'module_blocks']) {
       try {
         const r = await rest(t + '?select=*&limit=1', token);
         const n = Array.isArray(r.data) ? r.data.length : 0;
@@ -211,11 +256,18 @@ button.secondary{background:#e9eefa;color:#284aa2}
   });
 
   extra.innerHTML = `<div class="card"><h2>Если роль не admin</h2>
-    <p>SQL Editor, подставь свой email:</p>
-    <pre>update public.profiles set role = 'admin'
-where email = 'твой@email.ru'
+    <p>1. Supabase → Authentication → Users → <b>Add user</b>: создайте себе учётную запись
+      (включите «Auto Confirm User»).</p>
+    <p>2. Supabase → SQL Editor: выполните <code>supabase/bootstrap-admin.sql</code>,
+      заменив <code>admin@example.com</code> на свой email.</p>
+    <p>Или одной командой:</p>
+    <pre>update public.profiles set role = 'admin', is_blocked = false
+where lower(email) = lower('твой@email.ru')
 returning id, email, role;</pre>
-    <p>Если профиль есть, роль admin, а админка закрыта — открой её с Ctrl+F5: старый токен мог остаться в браузере.</p></div>`;
+    <p>Если профиль есть, роль admin, а админка закрыта — откройте её с Ctrl+F5:
+      старый токен мог остаться в браузере.</p>
+    <p>Для смены ролей и удаления пользователей из интерфейса выполните
+      <code>supabase/migrations/0004_admin_tools.sql</code>.</p></div>`;
 })();
 </script>
 </body></html>

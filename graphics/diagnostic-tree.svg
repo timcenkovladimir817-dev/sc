@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 520" font-family="Arial, Helvetica, sans-serif">
+  <rect width="900" height="520" fill="#ffffff"/>
+  <text x="24" y="30" font-size="16" font-weight="700" fill="#15243e">Дерево диагностики: от симптома к различающей проверке</text>
+  <text x="24" y="50" font-size="12" fill="#5b6b82">Ветви выбирают не по удобству, а по тому, какая проверка отделяет одну гипотезу от другой</text>
+
+  <g font-size="12" fill="#15243e">
+    <rect x="330" y="76" width="240" height="46" rx="9" fill="#eef3fd" stroke="#315de0"/>
+    <text x="450" y="104" text-anchor="middle" font-weight="700">Симптом уточнён и записан</text>
+
+    <rect x="330" y="150" width="240" height="42" rx="8" fill="#fef3e2" stroke="#d97706"/>
+    <text x="450" y="176" text-anchor="middle">Ход есть?</text>
+
+    <rect x="80" y="224" width="240" height="42" rx="8" fill="#fef2f2" stroke="#dc2626"/>
+    <text x="200" y="250" text-anchor="middle">Нет полного хода</text>
+    <rect x="580" y="224" width="240" height="42" rx="8" fill="#e8f6ec" stroke="#16a34a"/>
+    <text x="700" y="250" text-anchor="middle">Ход есть, пропуск остаётся</text>
+
+    <rect x="40" y="300" width="320" height="42" rx="8" fill="#ffffff" stroke="#dbe3ef"/>
+    <text x="200" y="320" font-size="11" text-anchor="middle">питание, воздух, настройка, ограничитель,</text>
+    <text x="200" y="336" font-size="11" text-anchor="middle">механика, трение, повреждение передачи</text>
+
+    <rect x="540" y="300" width="320" height="42" rx="8" fill="#ffffff" stroke="#dbe3ef"/>
+    <text x="700" y="320" font-size="11" text-anchor="middle">недостаточное усилие, износ седла, частицы,</text>
+    <text x="700" y="336" font-size="11" text-anchor="middle">неверное направление, разгрузка, настройка</text>
+
+    <rect x="40" y="374" width="320" height="50" rx="8" fill="#f8fafc" stroke="#64748b"/>
+    <text x="200" y="394" font-size="11" text-anchor="middle">Проверки: команда ↔ ход, давления,</text>
+    <text x="200" y="412" font-size="11" text-anchor="middle">ток/воздух, люфт, отсутствие заклинивания</text>
+
+    <rect x="540" y="374" width="320" height="50" rx="8" fill="#f8fafc" stroke="#64748b"/>
+    <text x="700" y="394" font-size="11" text-anchor="middle">Проверки: перепад при закрытии, посадка,</text>
+    <text x="700" y="412" font-size="11" text-anchor="middle">утечка по контуру, состояние трима</text>
+  </g>
+
+  <g stroke="#667" stroke-width="2" fill="#667">
+    <line x1="450" y1="122" x2="450" y2="150"/><polygon points="444,146 450,154 456,146"/>
+    <line x1="410" y1="192" x2="200" y2="224"/><polygon points="204,218 194,222 202,230"/>
+    <line x1="490" y1="192" x2="700" y2="224"/><polygon points="698,218 706,222 696,230"/>
+    <line x1="200" y1="266" x2="200" y2="300"/><polygon points="194,296 200,304 206,296"/>
+    <line x1="700" y1="266" x2="700" y2="300"/><polygon points="694,296 700,304 706,296"/>
+    <line x1="200" y1="342" x2="200" y2="374"/><polygon points="194,370 200,378 206,370"/>
+    <line x1="700" y1="342" x2="700" y2="374"/><polygon points="694,370 700,378 706,370"/>
+  </g>
+
+  <rect x="40" y="448" width="820" height="52" rx="9" fill="#fff7ed" stroke="#d97706"/>
+  <text x="60" y="470" font-size="12" fill="#7c4a03" font-weight="700">Правило: одна проверка должна давать разный результат при конкурирующих гипотезах.</text>
+  <text x="60" y="490" font-size="12" fill="#7c4a03">Если обе гипотезы объясняют наблюдение одинаково, проверка выбрана неудачно.</text>
+
+  <text x="24" y="516" font-size="11" fill="#5b6b82">Дерево — каркас мышления, а не замена анализу конкретной схемы, документации и условий.</text>
+</svg>

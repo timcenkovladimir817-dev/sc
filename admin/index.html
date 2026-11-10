@@ -1,48 +1,251 @@
 <!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Приглашение сотрудника — АРМАТУРА / PRO</title>
+<title>Панель обучения — АРМАТУРА / PRO</title>
 <link rel="stylesheet" href="../css/style.css">
-<style>
-.field{margin-bottom:14px}label{display:block;font-weight:600;margin-bottom:5px}
-input,select{width:100%;padding:10px;border:1px solid #bbc9de;border-radius:9px;font:inherit}
-button{padding:11px 18px;border:0;border-radius:9px;background:#315de0;color:#fff;font:inherit;cursor:pointer}
-button.secondary{background:#e9eefa;color:#284aa2}.notice{border-left:4px solid #d5a242;background:#fff7e5;padding:14px 18px;margin:16px 0;font-size:14px}
-.ok{border-left-color:#16926a;background:#eaf7ee}.err{border-left-color:#c0392b;background:#fff0ed}
-table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:10px;border-bottom:1px solid #dce4ef;text-align:left}
-</style></head>
-<body><div class="layout solo"><main id="app"><p>Проверка доступа…</p><p><a href="../index.html">← К учебнику</a></p></main></div>
+<script src="../js/theme.js"></script>
+</head>
+<body><div class="layout solo"><main id="app"><p>Проверка доступа…</p></main></div>
 <script src="../js/config.js"></script>
 <script src="../js/vendor/supabase.js"></script>
 <script src="../js/supabase-client.js"></script>
+<script src="../js/admin-nav.js"></script>
 <script>
 (async () => {
-  const admin = await requireAdmin();
-  if (!admin) return;
-  const app = document.querySelector('#app');
-  app.innerHTML = `
-  <div class="eyebrow">Администрирование обучения</div>
-  <h1>Пригласить сотрудника</h1>
-  <div class="card">
-    <form id="invite">
-      <div class="grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-        <div class="field"><label for="fullName">ФИО сотрудника *</label><input id="fullName" required maxlength="120" autocomplete="name"></div>
-        <div class="field"><label for="email">Рабочий email *</label><input id="email" type="email" required maxlength="254" autocomplete="off"></div>
-        <div class="field"><label for="position">Должность</label><input id="position" maxlength="120"></div>
-        <div class="field"><label for="department">Подразделение</label><input id="department" maxlength="120"></div>
-        <div class="field"><label for="mentor">Наставник (email)</label><input id="mentor" type="email" maxlength="254"></div>
-        <div class="field"><label for="supervisor">Руководитель (email)</label><input id="supervisor" type="email" maxlength="254"></div>
-        <div class="field"><label for="dueDate">Срок прохождения</label><input id="dueDate" type="date"></div>
-      </div>
-      <div class="notice">Наставник и руководитель получают задачу в Bitrix24 как наблюдатели. Учётные записи им не создаются. После отправки появится ссылка на прогресс — её можно передать отдельно.</div>
-      <div class="actions"><button type="submit" id="send">Отправить приглашение</button></div>
-      <p id="status" role="status"></p>
-    </form>
-  </div>
-  <div class="card"><h2>Последние приглашения</h2><div id="list">Загрузка…</div></div>`
-  <p><a href="../index.html">← К учебнику</a></p>`;
-  await loadList();
+  'use strict';
 
-  document.querySelector('#invite').addEventListener('submit', async (event) => {
+  const staff = await requireStaff();
+  if (!staff) return;
+
+  const app = document.querySelector('#app');
+  const me = staff.profile;
+  const isAdmin = me.role === 'admin';
+  const site = String(APP_CONFIG.siteUrl || '').replace(/\/$/, '');
+
+  app.innerHTML = `
+    <div id="admin-nav"></div>
+
+    <div class="admin-hero">
+      <div class="eyebrow" style="color:#c7d9ff">Администрирование обучения</div>
+      <h1>Панель обучения</h1>
+      <p>Здесь выдаются доступы, назначается курс и контролируется прогресс. Сотрудник получает письмо,
+        сам задаёт пароль и работает со своим прогрессом; наставник и руководитель видят прогресс по ссылке.</p>
+      <div class="actions">
+        <a class="button-link" href="#invite">Пригласить сотрудника</a>
+        <a class="button-link secondary" href="users.html">Пользователи и роли</a>
+        <a class="button-link secondary" href="diag.html">Диагностика</a>
+      </div>
+    </div>
+
+    <div class="stat-grid" id="stats"></div>
+    <div class="notice" id="msg" role="status" hidden></div>
+
+    <div class="grid">
+      <div class="card" id="invite">
+        <h2>Пригласить сотрудника</h2>
+        <p class="muted">Аккаунт создаётся сразу, письмо содержит ссылку для задания пароля.
+          Если почта не настроена, передайте ссылку вручную после отправки.</p>
+        <form id="invite-form">
+          <div class="grid" style="gap:0 16px">
+            <div class="field"><label for="fullName">ФИО сотрудника *</label>
+              <input id="fullName" required maxlength="120" autocomplete="name"></div>
+            <div class="field"><label for="email">Рабочий email *</label>
+              <input id="email" type="email" required maxlength="254" autocomplete="off"></div>
+            <div class="field"><label for="position">Должность</label><input id="position" maxlength="120"></div>
+            <div class="field"><label for="department">Подразделение</label><input id="department" maxlength="120"></div>
+            <div class="field"><label for="mentor">Наставник (email)</label>
+              <input id="mentor" type="email" maxlength="254" placeholder="Необязательно"></div>
+            <div class="field"><label for="supervisor">Руководитель (email)</label>
+              <input id="supervisor" type="email" maxlength="254" placeholder="Необязательно"></div>
+            <div class="field"><label for="dueDate">Срок прохождения</label><input id="dueDate" type="date"></div>
+            <div class="field"><label for="course">Курс</label><select id="course"><option value="armatura">Запорная и регулирующая арматура</option></select></div>
+          </div>
+          <div class="notice">Наставник и руководитель получают задачу в Bitrix24 как наблюдатели.
+            Учётные записи им не создаются. Ссылка на прогресс будет показана после отправки.</div>
+          <div class="actions"><button type="submit" id="send">Отправить приглашение</button></div>
+          <p id="status" role="status" aria-live="polite"></p>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Как выдаётся доступ</h2>
+        <ol class="checklist">
+          <li><b>Приглашение.</b> Администратор заполняет ФИО и рабочий email. Создаются профиль,
+            назначение курса и ссылка на прогресс.</li>
+          <li><b>Пароль.</b> Сотрудник открывает письмо и задаёт пароль на странице
+            <code>/reset.html</code>. Пароль администратору не показывается.</li>
+          <li><b>Обучение.</b> Прогресс сохраняется по главам. Наставник и руководитель смотрят
+            его по ссылке <code>/progress.html?token=…</code> без отдельного аккаунта.</li>
+          <li><b>Контроль.</b> В разделе «Пользователи» можно сменить роль, заблокировать вход,
+            отправить письмо для сброса пароля и выдать новую ссылку на прогресс.</li>
+        </ol>
+        <div class="notice" style="margin-bottom:0">
+          <b>Кто есть кто.</b> <span class="badge">Сотрудник</span> — проходит курс.
+          <span class="badge">Наставник</span> — помогает и видит прогресс.
+          <span class="badge">Администратор</span> — управляет доступами и приглашениями.
+        </div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>Последние приглашения</h2>
+        <div id="invites"><p class="muted">Загрузка…</p></div>
+        <p class="actions" style="margin-bottom:0"><a class="button-link secondary" href="users.html">Все приглашения и пользователи</a></p>
+      </div>
+      <div class="card">
+        <h2>Последние пользователи</h2>
+        <div id="recent"><p class="muted">Загрузка…</p></div>
+        <p class="actions" style="margin-bottom:0"><a class="button-link secondary" href="users.html">Управлять пользователями</a></p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Служебные разделы</h2>
+      <div class="grid">
+        <div>
+          <h3><a href="import.html">Главы в базу</a></h3>
+          <p class="muted">Переносит JSON-главы из <code>content/modules</code> в таблицы курса.</p>
+          <h3><a href="editor.html">Иллюстрации</a></h3>
+          <p class="muted">Загрузка схем в хранилище и привязка к разделам главы.</p>
+        </div>
+        ${isAdmin ? `
+        <div>
+          <h3><a href="storage.html">Схемы из репозитория</a></h3>
+          <p class="muted">Пакетная загрузка SVG из папки <code>graphics</code> в хранилище.</p>
+          <h3><a href="audit.html">Журнал действий</a></h3>
+          <p class="muted">Кто менял роли, блокировал, приглашал и выдавал доступы.</p>
+          <h3><a href="diag.html">Диагностика доступа</a></h3>
+          <p class="muted">Показывает сессию, роль, профиль и доступ к таблицам. Начните отсюда,
+            если админка не открывается.</p>
+        </div>
+        ` : ''}
+      </div>
+    </div>
+  `;
+
+  const msg = document.querySelector('#msg');
+  const invitesBox = document.querySelector('#invites');
+  const recentBox = document.querySelector('#recent');
+
+  function notify(html, kind) {
+    msg.className = 'notice' + (kind ? ' ' + kind : '');
+    msg.innerHTML = html;
+    msg.hidden = false;
+  }
+
+  async function selectAll(table, order) {
+    let result = order
+      ? await sb.from(table).select('*').order(order, { ascending: false })
+      : await sb.from(table).select('*');
+    if (result.error && order) result = await sb.from(table).select('*');
+    return result;
+  }
+
+  function fmtDate(value) {
+    if (!value) return '—';
+    const date = new Date(value.length === 10 ? value + 'T00:00:00' : value);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString('ru-RU');
+  }
+
+  const inviteNames = { pending: 'Ожидает входа', accepted: 'Принято', revoked: 'Отозвано' };
+  const roleNames = { admin: 'Администратор', teacher: 'Наставник', student: 'Сотрудник' };
+
+  async function loadOverview() {
+    const [profiles, enrollments, invitations] = await Promise.all([
+      selectAll('profiles', 'created_at'),
+      selectAll('enrollments', 'created_at'),
+      isAdmin ? selectAll('invitations', 'created_at') : Promise.resolve({ data: [], error: null }),
+    ]);
+
+    if (profiles.error) {
+      document.querySelector('#stats').innerHTML =
+        `<div class="notice err">Не удалось прочитать пользователей: ${esc(profiles.error.message)}</div>`;
+      recentBox.innerHTML = '<p class="muted">Нет данных профилей.</p>';
+    } else {
+      const users = profiles.data || [];
+      const active = (enrollments.data || []).filter((item) => item.status !== 'cancelled');
+      const completed = active.filter((item) => item.status === 'completed').length;
+      const avg = active.length
+        ? Math.round(active.reduce((sum, item) => sum + (Number(item.progress) || 0), 0) / active.length)
+        : 0;
+      const blocked = users.filter((item) => item.is_blocked).length;
+      const pending = (invitations.data || []).filter((item) => item.status === 'pending').length;
+
+      document.querySelector('#stats').innerHTML = [
+        ['Пользователи', users.length, 'всего в системе', ''],
+        ['Назначения', active.length, completed + ' завершено', ''],
+        ['Средний прогресс', avg + '%', 'по активным', avg >= 80 ? 'ok' : avg >= 40 ? 'warn' : ''],
+        ['Заблокированы', blocked, 'вход запрещён', blocked ? 'bad' : 'ok'],
+        ['Приглашения', pending, 'ожидают входа', pending ? 'warn' : ''],
+      ].map(([label, value, hint, cls]) =>
+        `<div class="stat-card ${cls}"><span class="stat-label">${esc(label)}</span>
+          <b class="stat-value">${esc(value)}</b><span class="stat-hint">${esc(hint)}</span></div>`).join('');
+
+      const recent = users.slice(0, 5);
+      recentBox.innerHTML = recent.length ? `<div class="tablewrap"><table><tbody>
+        ${recent.map((user) => `<tr>
+          <td><div class="user-name">${esc(user.full_name || 'Без имени')}</div>
+            <div class="user-sub">${esc(user.email || '—')}</div></td>
+          <td><span class="badge ${user.role === 'admin' ? '' : 'muted'}">${esc(roleNames[user.role] || user.role || '—')}</span></td>
+          <td>${user.is_blocked ? '<span class="badge bad">Заблокирован</span>' : '<span class="badge ok">Активен</span>'}</td>
+        </tr>`).join('')}
+      </tbody></table></div>` : '<div class="empty">Пользователей пока нет.</div>';
+    }
+
+    if (!isAdmin) {
+      invitesBox.innerHTML = '<p class="muted">Управление приглашениями доступно администратору обучения.</p>';
+      return;
+    }
+
+    if (invitations.error) {
+      invitesBox.innerHTML = `<div class="notice err">Приглашения не загрузились: ${esc(invitations.error.message)}</div>`;
+      return;
+    }
+
+    const list = (invitations.data || []).slice(0, 6);
+    if (!list.length) {
+      invitesBox.innerHTML = '<div class="empty">Приглашений пока нет.</div>';
+      return;
+    }
+    invitesBox.innerHTML = `<div class="tablewrap"><table>
+      <thead><tr><th>Сотрудник</th><th>Срок</th><th>Статус</th><th></th></tr></thead>
+      <tbody>${list.map((invite) => {
+        const pending = invite.status === 'pending';
+        const badge = invite.status === 'accepted' ? 'ok' : invite.status === 'pending' ? 'warn' : 'muted';
+        return `<tr>
+          <td><div class="user-name">${esc(invite.full_name || 'Без имени')}</div>
+            <div class="user-sub">${esc(invite.email || '—')}</div></td>
+          <td>${fmtDate(invite.due_date)}</td>
+          <td><span class="badge ${badge}">${esc(inviteNames[invite.status] || invite.status || '—')}</span></td>
+          <td>${pending ? `<button type="button" class="small secondary" data-resend="${esc(invite.id)}">Повторить</button>` : '—'}</td>
+        </tr>`;
+      }).join('')}</tbody></table></div>`;
+  }
+
+  invitesBox.addEventListener('click', async (event) => {
+    const button = event.target.closest('button[data-resend]');
+    if (!button) return;
+    if (!confirm('Отправить приглашение повторно? Старое будет отозвано.')) return;
+    button.disabled = true;
+    try {
+      await callFunction('resend-invite', { invitationId: button.dataset.resend });
+      notify('Приглашение отправлено повторно.', 'ok');
+      await loadOverview();
+    } catch (error) {
+      notify('Не отправлено: ' + esc(error.message), 'err');
+      button.disabled = false;
+    }
+  });
+
+  // Курсы: если в базе есть список, показываем его; иначе остаётся armatura.
+  (async () => {
+    const { data } = await sb.from('courses').select('slug, title').order('title');
+    if (!Array.isArray(data) || !data.length) return;
+    document.querySelector('#course').innerHTML = data.map((course) =>
+      `<option value="${esc(course.slug)}">${esc(course.title || course.slug)}</option>`).join('');
+  })();
+
+  document.querySelector('#invite-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const status = document.querySelector('#status');
     const button = document.querySelector('#send');
@@ -54,49 +257,41 @@ table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:10px;bord
       mentorEmail: document.querySelector('#mentor').value,
       supervisorEmail: document.querySelector('#supervisor').value,
       dueDate: document.querySelector('#dueDate').value || null,
-      courseSlug: 'armatura',
+      courseSlug: document.querySelector('#course').value || 'armatura',
     };
-    status.textContent = 'Отправляем…'; status.className = 'notice';
+    status.className = 'notice';
+    status.textContent = 'Отправляем…';
     button.disabled = true;
     try {
       const data = await callFunction('invite-user', payload);
+      sb.rpc('admin_log_action', { p_action: 'invitation_created', p_target: 'invitation', p_details: { email: payload.email } }).then(() => {}, () => {});
       status.className = 'notice ok';
       status.innerHTML = `Приглашение отправлено на <b>${esc(payload.email)}</b>.`
         + (data.bitrixTaskId ? `<br>Задача Bitrix24: <b>${esc(data.bitrixTaskId)}</b>.` : '<br>Задача Bitrix24 не создана.')
+        + (data.inviteUrl
+          ? `<br>Ссылка для задания пароля: <a href="${esc(data.inviteUrl)}" target="_blank" rel="noopener">открыть</a><br><small>Передайте её сотруднику, если письмо не дошло.</small>`
+          : '')
         + `<br>Ссылка на прогресс для наблюдателей: <a href="${esc(data.progressUrl)}" target="_blank" rel="noopener">${esc(data.progressUrl)}</a>`
         + (data.warnings?.length ? `<br><small>${data.warnings.map(esc).join('<br>')}</small>` : '')
-        + '<br><small>Ссылку на прогресс стоит вставить в задачу или отправить наблюдателям.</small>';
+        + '<br><small>Ссылку стоит вставить в задачу или отправить наставнику и руководителю.</small>';
       event.target.reset();
-      await loadList();
+      document.querySelector('#course').value = payload.courseSlug;
+      await loadOverview();
     } catch (error) {
       status.className = 'notice err';
       status.textContent = 'Не отправлено: ' + error.message;
-    } finally { button.disabled = false; }
+    } finally {
+      button.disabled = false;
+    }
   });
 
-  async function loadList() {
-    const { data, error } = await sb.from('invitations')
-      .select('id, email, full_name, status, due_date, created_at, bitrix_task_id, bitrix_error, enrollment_id')
-      .order('created_at', { ascending: false }).limit(20);
-    if (error) { document.querySelector('#list').textContent = error.message; return; }
-    if (!data.length) { document.querySelector('#list').textContent = 'Приглашений пока нет.'; return; }
-    document.querySelector('#list').innerHTML = `<div class="tablewrap"><table><thead><tr><th>Сотрудник</th><th>Email</th><th>Срок</th><th>Статус</th><th>Bitrix</th><th></th></tr></thead><tbody>${data.map((row) => `<tr>
-      <td>${esc(row.full_name)}</td><td>${esc(row.email)}</td><td>${esc(row.due_date ?? '—')}</td>
-      <td>${esc(statusText(row.status))}</td>
-      <td>${row.bitrix_task_id ? '№ ' + esc(row.bitrix_task_id) : (row.bitrix_error ? '<span title="' + esc(row.bitrix_error) + '">ошибка</span>' : '—')}</td>
-      <td>${row.status === 'pending' ? `<button type="button" class="secondary" data-resend="${esc(row.id)}">Отправить повторно</button>` : ''}</td>
-    </tr>`).join('')}</tbody></table></div>`;
-    document.querySelectorAll('[data-resend]').forEach((button) => {
-      button.addEventListener('click', async () => {
-        button.disabled = true; button.textContent = 'Отправляем…';
-        try { await callFunction('resend-invite', { invitationId: button.dataset.resend }); await loadList(); }
-        catch (error) { alert(error.message); button.disabled = false; button.textContent = 'Отправить повторно'; }
-      });
-    });
+  await loadOverview();
+})().catch((error) => {
+  const app = document.querySelector('#app');
+  if (app) {
+    app.innerHTML = `<div class="notice err">Панель не загрузилась: ${esc(error && error.message || error)}</div>
+      <p><a href="diag.html">Диагностика</a> · <a href="../index.html">Учебник</a></p>`;
   }
-
-  function statusText(value) {
-    return ({ pending: 'ожидает входа', accepted: 'принято', revoked: 'отозвано' })[value] ?? value;
-  }
-})();
-</script></body></html>
+});
+</script>
+</body></html>

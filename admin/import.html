@@ -2,6 +2,7 @@
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Перенос глав в базу — АРМАТУРА / PRO</title>
 <link rel="stylesheet" href="../css/style.css">
+<script src="../js/theme.js"></script>
 <style>
 .log{font-family:ui-monospace,Consolas,monospace;font-size:13px;white-space:pre-wrap;background:#f4f7fc;border:1px solid #dce4ef;border-radius:9px;padding:14px;margin-top:16px;max-height:340px;overflow:auto}
 .log b{color:#16926a}.log i{color:#c0392b}
@@ -12,11 +13,13 @@ button:disabled{opacity:.55;cursor:default}
 <script src="../js/config.js"></script>
 <script src="../js/vendor/supabase.js"></script>
 <script src="../js/supabase-client.js"></script>
+<script src="../js/admin-nav.js"></script>
 <script>
 (async () => {
-  const admin = await requireAdmin();
-  if (!admin) return;
+  const staff = await requireStaff();
+  if (!staff) return;
   document.querySelector('#app').innerHTML = `
+    <div id="admin-nav"></div>
     <div class="eyebrow">Администрирование обучения</div>
     <h1>Перенести главы из JSON в базу</h1>
     <div class="card">

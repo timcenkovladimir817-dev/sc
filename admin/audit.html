@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Журнал действий — АРМАТУРА / PRO</title>
+<link rel="stylesheet" href="../css/style.css">
+<script src="../js/theme.js"></script>
+</head>
+<body><div class="layout solo"><main id="app"><p>Проверка доступа…</p></main></div>
+<script src="../js/config.js"></script>
+<script src="../js/vendor/supabase.js"></script>
+<script src="../js/supabase-client.js"></script>
+<script src="../js/admin-nav.js"></script>
+<script>
+(async () => {
+  'use strict';
+
+  const admin = await requireAdmin();
+  if (!admin) return;
+
+  const app = document.querySelector('#app');
+  const actionNames = {
+    role_changed: 'Смена роли',
+    user_blocked: 'Блокировка',
+    user_unblocked: 'Разблокировка',
+    user_deleted: 'Удаление учётной записи',
+    invitation_created: 'Приглашение',
+    invitation_resent: 'Повторное приглашение',
+    invitation_revoked: 'Отзыв приглашения',
+    password_reset_sent: 'Сброс пароля',
+    progress_link_created: 'Ссылка на прогресс',
+    reminders_sent: 'Напоминания о сроках',
+  };
+
+  app.innerHTML = `
+    <div id="admin-nav"></div>
+    <div class="eyebrow">Администрирование обучения</div>
+    <h1>Журнал действий</h1>
+    <p class="muted">Кто и когда менял роли, блокировал вход, приглашал сотрудников, выдавал ссылки на прогресс и отправлял письма.
+      Записи хранятся только на чтение: их нельзя изменить или удалить из интерфейса.</p>
+
+    <div class="card">
+      <div class="toolbar">
+        <input id="q" type="search" placeholder="Поиск: администратор, действие, email" autocomplete="off">
+        <select id="filter" aria-label="Фильтр действий">
+          <option value="all">Все действия</option>
+          <option value="role_changed">Смена роли</option>
+          <option value="user_blocked">Блокировка</option>
+          <option value="user_unblocked">Разблокировка</option>
+          <option value="user_deleted">Удаление</option>
+          <option value="invitation_created">Приглашение</option>
+          <option value="invitation_resent">Повторное приглашение</option>
+          <option value="invitation_revoked">Отзыв приглашения</option>
+          <option value="password_reset_sent">Сброс пароля</option>
+          <option value="progress_link_created">Ссылка на прогресс</option>
+          <option value="reminders_sent">Напоминания</option>
+        </select>
+        <button type="button" class="secondary" id="refresh">Обновить</button>
+      </div>
+      <div id="log"><p class="muted">Загрузка журнала…</p></div>
+    </div>
+
+    <div class="notice">Если журнал пуст, но операции выполнялись — проверьте, что применена миграция
+      <code>supabase/migrations/0004_admin_tools.sql</code>, а для старых действий история не переносится.</div>
+  `;
+
+  const logBox = document.querySelector('#log');
+
+  function fmt(value) {
+    if (!value) return '—';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('ru-RU');
+  }
+
+  function describe(action, details) {
+    const email = details && details.email ? ` <b>${esc(details.email)}</b>` : '';
+    switch (action) {
+      case 'role_changed': {
+        const names = { admin: 'Администратор', teacher: 'Наставник', student: 'Сотрудник' };
+        return `назначил роль «${esc(names[details.role] || details.role || '—')}»${email}`;
+      }
+      case 'user_blocked': return `заблокировал вход${email}`;
+      case 'user_unblocked': return `разблокировал вход${email}`;
+      case 'user_deleted': return `удалил учётную запись${email}`;
+      case 'invitation_created': return `пригласил сотрудника${email}`;
+      case 'invitation_resent': return `отправил приглашение повторно${email}`;
+      case 'invitation_revoked': return 'отозвал приглашение';
+      case 'password_reset_sent': return `отправил письмо для сброса пароля${email}`;
+      case 'progress_link_created': return 'выдал ссылку на прогресс';
+      case 'reminders_sent': return 'отправил напоминания о сроках';
+      default: return esc(action);
+    }
+  }
+
+  async function load() {
+    logBox.innerHTML = '<p class="muted">Загрузка журнала…</p>';
+
+    // Профили читаем отдельно — admin_id в журнале может указывать на удалённого администратора.
+    const [logResult, profilesResult] = await Promise.all([
+      sb.from('admin_audit_log').select('*').order('created_at', { ascending: false }).limit(500),
+      sb.from('profiles').select('id, full_name, email'),
+    ]);
+
+    if (logResult.error) {
+      logBox.innerHTML = `<div class="notice err">Журнал не загрузился: ${esc(logResult.error.message)}<br>
+        <small>Убедитесь, что применена миграция 0004_admin_tools.sql.
+        <a href="diag.html">Диагностика</a></small></div>`;
+      return;
+    }
+
+    const byId = {};
+    (profilesResult.data || []).forEach((profile) => { byId[profile.id] = profile; });
+
+    const query = document.querySelector('#q').value.trim().toLowerCase();
+    const filter = document.querySelector('#filter').value;
+    let rows = logResult.data || [];
+    if (filter !== 'all') rows = rows.filter((item) => item.action === filter);
+    if (query) {
+      rows = rows.filter((item) => {
+        const adminProfile = byId[item.admin_id];
+        const haystack = [adminProfile && adminProfile.full_name, adminProfile && adminProfile.email,
+          actionNames[item.action] || item.action, item.action,
+          item.details && item.details.email].filter(Boolean).join(' ').toLowerCase();
+        return haystack.includes(query);
+      });
+    }
+
+    if (!rows.length) {
+      logBox.innerHTML = '<div class="empty">Записей не найдено.</div>';
+      return;
+    }
+
+    logBox.innerHTML = `<div class="tablewrap responsive-wrap"><table class="responsive">
+      <thead><tr><th>Когда</th><th>Администратор</th><th>Действие</th></tr></thead>
+      <tbody>${rows.map((item) => {
+        const adminProfile = byId[item.admin_id];
+        return `<tr>
+          <td data-label="Когда">${fmt(item.created_at)}</td>
+          <td data-label="Администратор">
+            <div class="user-name">${esc(adminProfile ? (adminProfile.full_name || '—') : 'Удалённый администратор')}</div>
+            <div class="user-sub">${esc(adminProfile && adminProfile.email ? adminProfile.email : '')}</div>
+          </td>
+          <td data-label="Действие">
+            <span class="badge muted">${esc(actionNames[item.action] || item.action)}</span>
+            ${describe(item.action, item.details)}
+          </td>
+        </tr>`;
+      }).join('')}</tbody></table></div>
+      <p class="muted small">Показано ${rows.length} записей (не более 500 последних).</p>`;
+  }
+
+  document.querySelector('#refresh').addEventListener('click', load);
+  document.querySelector('#q').addEventListener('input', load);
+  document.querySelector('#filter').addEventListener('change', load);
+
+  await load();
+})().catch((error) => {
+  const app = document.querySelector('#app');
+  if (app) {
+    app.innerHTML = `<div class="notice err">Журнал не загрузился: ${esc(error && error.message || error)}</div>
+      <p><a href="diag.html">Диагностика</a> · <a href="../index.html">Учебник</a></p>`;
+  }
+});
+</script>
+</body></html>

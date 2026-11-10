@@ -1,7 +1,13 @@
+// Ограничение источника: ALLOWED_ORIGIN → SITE_URL. Если ни один не задан,
+// кросс-доменные запросы не разрешаются (нет fallback на '*'), чтобы чужие
+// домены не могли читать ответы функций. Для работы сайта на GitHub Pages
+// задайте SITE_URL или ALLOWED_ORIGIN в секретах каждой функции.
+const origin = Deno.env.get('ALLOWED_ORIGIN') || Deno.env.get('SITE_URL') || '';
 export const corsHeaders = {
-  'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_ORIGIN') ?? '*',
+  ...(origin ? { 'Access-Control-Allow-Origin': origin } : {}),
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  ...(origin ? { 'Vary': 'Origin' } : {}),
 };
 
 export function json(body: unknown, status = 200): Response {

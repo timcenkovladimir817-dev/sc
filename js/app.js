@@ -2,10 +2,14 @@
 'use strict';
 const modules=BOOK.modules;
 const $=s=>document.querySelector(s);
-const escapeHTML=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const escapeHTML=(typeof window.esc==='function')?window.esc:(s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])));
+// Разрешаем только безопасные схемы URL для ссылок и картинок из контента.
+// Блокирует javascript:, data: (кроме изображений) и прочие опасные схемы.
+const isHttpUrl=(s)=>/^https?:\/\//i.test(String(s??'').trim());
+const isImageUrl=(s)=>/^(images\/|graphics\/|data:image\/(png|jpeg|webp);base64,|https?:\/\/)/i.test(String(s??'').trim());
 const KEY='armatura.training.project.v5';
-let state={done:[],notes:{},best:null},storageOK=true;
-try{const saved=JSON.parse(localStorage.getItem(KEY));if(saved&&typeof saved==='object'){state.done=Array.isArray(saved.done)?[...new Set(saved.done.filter(x=>Number.isInteger(x)&&x>=0&&x<modules.length))]:[];state.notes=Object.fromEntries(Object.entries(saved.notes||{}).filter(([k,v])=>/^\d+$/.test(k)&&typeof v==='string'));state.best=typeof saved.best==='number'&&saved.best>=0&&saved.best<=100?saved.best:null}}catch(e){storageOK=false}
+let state={done:[],notes:{},bookmarks:[],best:null},storageOK=true;
+try{const saved=JSON.parse(localStorage.getItem(KEY));if(saved&&typeof saved==='object'){state.done=Array.isArray(saved.done)?[...new Set(saved.done.filter(x=>Number.isInteger(x)&&x>=0&&x<modules.length))]:[];state.notes=Object.fromEntries(Object.entries(saved.notes||{}).filter(([k,v])=>/^\d+$/.test(k)&&typeof v==='string'));state.bookmarks=Array.isArray(saved.bookmarks)?[...new Set(saved.bookmarks.filter(x=>Number.isInteger(x)&&x>=0&&x<modules.length))]:[];state.best=typeof saved.best==='number'&&saved.best>=0&&saved.best<=100?saved.best:null}}catch(e){storageOK=false}
 function save(){try{localStorage.setItem(KEY,JSON.stringify(state));return true}catch(e){storageOK=false;return false}}
 // Синхронизация прогресса с Supabase для вошедшего сотрудника.
 // Локальное хранилище остаётся основным; облако — резерв и источник для наставника.
@@ -19,6 +23,30 @@ function visibleModules(){return visibleIndices().map(i=>modules[i])}
 function visibleDoneCount(){const set=assignedSet();return state.done.filter(i=>!set||set.has(slugFor(i))).length}
 function firstVisible(){const idx=visibleIndices();return idx.length?idx[0]:0}
 function nextVisible(i){for(const x of visibleIndices()){if(x>i)return x}return -1}
+function enrollmentId(){return window.ACTIVE_ENROLLMENT||null}
+function cloudWarn(label){return e=>console.warn(label+':',e.message)}
+async function fetchMyProgress(){
+  const enr=enrollmentId();
+  if(enr){
+    const scoped=await sb.rpc('my_progress_for',{p_enrollment:enr});
+    if(!scoped.error)return scoped.data;
+    const legacy=await sb.rpc('my_progress');
+    return legacy.error?null:legacy.data;
+  }
+  const legacy=await sb.rpc('my_progress');
+  return legacy.error?null:legacy.data;
+}
+async function fetchMyQuizBest(){
+  const enr=enrollmentId();
+  if(enr){
+    const scoped=await sb.rpc('my_quiz_best_for',{p_enrollment:enr});
+    if(!scoped.error)return scoped.data;
+    const legacy=await sb.rpc('my_quiz_best');
+    return legacy.error?null:legacy.data;
+  }
+  const legacy=await sb.rpc('my_quiz_best');
+  return legacy.error?null:legacy.data;
+}
 async function initCloud(){
   if(!window.sb)return;
   try{
@@ -30,12 +58,11 @@ async function initCloud(){
     // а у администратора статистика показывала нули.
     cloudReady=true;
 
-    // Функция my_progress возвращает jsonb; в ряде версий клиента он приходит
-    // строкой JSON — приводим к массиву, чтобы не терять синхронизацию.
-    let {data,error}=await sb.rpc('my_progress');
+    // Функции возвращают jsonb; в ряде версий клиента он приходит строкой JSON.
+    let data=await fetchMyProgress();
     if(typeof data==='string'){try{data=JSON.parse(data)}catch(e){data=null}}
-    if(error||!Array.isArray(data)){
-      console.warn('Прогресс из базы не получен:',error&&error.message);
+    if(!Array.isArray(data)){
+      console.warn('Прогресс из базы не получен (не применена миграция 0005/0007/0012?)');
     }else{
       const cloudDone=[],cloudNotes={};
       for(const row of data){
@@ -49,19 +76,15 @@ async function initCloud(){
       for(const k in cloudNotes){if(!state.notes[k])state.notes[k]=cloudNotes[k]}
     }
 
-    let {data:qb,error:qerr}=await sb.rpc('my_quiz_best');
+    let qb=await fetchMyQuizBest();
     if(typeof qb==='string'){qb=Number(qb)}
-    const cloudBest=(!qerr&&typeof qb==='number'&&!isNaN(qb))?qb:null;
+    const cloudBest=(typeof qb==='number'&&!isNaN(qb))?qb:null;
     if(cloudBest!=null&&cloudBest>0&&(state.best===null||cloudBest>state.best))state.best=cloudBest;
-    if(state.best!=null&&(cloudBest===null||state.best>cloudBest)){
-      sb.rpc('save_my_quiz',{p_percent:state.best})
-        .then(r=>{if(r.error)console.warn('Результат теста не сохранён в базе:',r.error.message)})
-        .catch(e=>console.warn('Результат теста не сохранён в базе:',e.message));
-    }
+    if(state.best!=null&&(cloudBest===null||state.best>cloudBest)){pushQuiz(state.best);}
 
     // Отправляем в облако локально пройденные главы, которых могло не быть в базе
-    // (например, до исправления синхронизации). save_my_progress только повышает
-    // процент, поэтому повторная отправка безопасна.
+    // (например, до исправления синхронизации). Процент только растёт,
+    // поэтому повторная отправка безопасна.
     for(const i of state.done){pushCloud(slugFor(i),100,state.notes[i]||'')}
 
     save();
@@ -69,9 +92,23 @@ async function initCloud(){
 }
 function pushCloud(slug,percent,notes){
   if(!window.sb||!cloudReady)return Promise.resolve();
+  const enr=enrollmentId();
+  if(enr){
+    return sb.rpc('save_my_progress_for',{p_enrollment:enr,p_slug:slug,p_percent:percent,p_notes:notes||null})
+      .then(r=>{ if(r.error){ return sb.rpc('save_my_progress',{p_slug:slug,p_percent:percent,p_notes:notes||null}).then(r2=>{if(r2.error)console.warn('Прогресс не сохранён в базе:',r2.error.message)}).catch(cloudWarn('Прогресс не сохранён в базе')); } })
+      .catch(cloudWarn('Прогресс не сохранён в базе'));
+  }
   return sb.rpc('save_my_progress',{p_slug:slug,p_percent:percent,p_notes:notes||null})
     .then(r=>{if(r.error)console.warn('Прогресс не сохранён в базе:',r.error.message)})
-    .catch(e=>console.warn('Прогресс не сохранён в базе:',e.message));
+    .catch(cloudWarn('Прогресс не сохранён в базе'));
+}
+function resetCloud(i){
+  if(!window.sb||!cloudReady)return;
+  const enr=enrollmentId();
+  if(!enr)return;
+  sb.rpc('reset_my_progress',{p_enrollment:enr,p_slug:slugFor(i)})
+    .then(r=>{if(r.error)console.warn('Сброс не сохранён в базе:',r.error.message)})
+    .catch(cloudWarn('Сброс не сохранён в базе'));
 }
 function pushProgress(i){
   pushCloud(slugFor(i),state.done.includes(i)?100:0,state.notes[i]||'');
@@ -82,58 +119,44 @@ function pushNotes(i){
 }
 function pushQuiz(pct){
   if(!window.sb||!cloudReady)return;
+  const enr=enrollmentId();
+  if(enr){
+    sb.rpc('save_my_quiz_for',{p_enrollment:enr,p_percent:pct})
+      .then(r=>{ if(r.error){ return sb.rpc('save_my_quiz',{p_percent:pct}).then(r2=>{if(r2.error)console.warn('Результат теста не сохранён в базе:',r2.error.message)}).catch(cloudWarn('Результат теста не сохранён в базе')); } })
+      .catch(cloudWarn('Результат теста не сохранён в базе'));
+    return;
+  }
   sb.rpc('save_my_quiz',{p_percent:pct})
     .then(r=>{if(r.error)console.warn('Результат теста не сохранён в базе:',r.error.message)})
-    .catch(e=>console.warn('Результат теста не сохранён в базе:',e.message));
+    .catch(cloudWarn('Результат теста не сохранён в базе'));
 }
-const pages=[['home','Обзор'],['modules','Учебные модули'],['standards','ГОСТы'],['calc','Калькуляторы'],['test','Проверка знаний']];
+const pages=[['home','Обзор'],['modules','Учебные модули'],['standards','ГОСТы'],['glossary','Глоссарий'],['calc','Калькуляторы'],['test','Проверка знаний']];
 let current='home',activeModule=0;
 function nav(page){current=page;$('#nav').innerHTML=pages.map(([k,t])=>`<button data-page="${k}" class="${k===page?'active':''}" ${k===page?'aria-current="page"':''}>${t}</button>`).join('');$('#title').textContent=pages.find(x=>x[0]===page)[1];render();window.scrollTo(0,0)}
 $('#nav').addEventListener('click',e=>{const b=e.target.closest('[data-page]');if(b)nav(b.dataset.page)});
-function render(){if(current==='home')home();if(current==='modules')catalog();if(current==='standards')standards();if(current==='calc')calc();if(current==='test')startQuiz()}
-/**
- * Генерирует HTML-код для одного раздела с поддержкой изображений
- * @param {Object} section - Объект раздела из JSON
- * @returns {string} HTML-разметка раздела
- */
-function renderSection(section) {
-    let html = `<article class="content-section">`;
-    html += `<h3 class="section-title">${section.title || ''}</h3>`;
-    html += `<div class="section-text">${section.text || ''}</div>`;
-    
-    // Отрисовка изображений внутри раздела
-    if (section.images && Array.isArray(section.images) && section.images.length > 0) {
-        html += `<div class="section-images-grid">`;
-        section.images.forEach(img => {
-            const imgSrc = img.src || img.data || ''; // Поддержка и 'src', и старого 'data'
-            const caption = img.caption || '';
-            
-            html += `
-                <figure class="image-card">
-                    <img src="${imgSrc}" alt="${caption}" loading="lazy" onerror="this.style.display='none'; this.nextElementSibling.textContent='Изображение не загружено';">
-                    <figcaption class="image-caption">${caption}</figcaption>
-                </figure>
-            `;
-        });
-        html += `</div>`;
-    }
-    
-    html += `</article>`;
-    return html;
-}
-
-// Пример использования внутри вашей основной функции рендеринга главы:
-// const sectionsHtml = moduleData.sections.map(renderSection).join('');
-// document.getElementById('chapter-content').innerHTML = sectionsHtml;
+function render(){if(current==='home')home();if(current==='modules')catalog();if(current==='standards')standards();if(current==='glossary')glossary();if(current==='calc')calc();if(current==='test')startQuiz()}
 function home(){const chars=modules.reduce((s,m)=>s+m.sections.reduce((n,x)=>n+x[1].length,0),0);$('#view').innerHTML=`<div class="grid"><div class="card"><span class="pill">Расширенная программа</span><div class="stat">${visibleModules().length} модулей · ${visibleModules().reduce((n,m)=>n+m.hours,0)} ч с практикой</div><p>Конструкция, нормы, безопасность, фланцы, гидравлика, утечки, диагностика, ремонт и приёмка.</p></div><div class="card"><span class="pill">Ваш прогресс</span><div class="stat">${visibleDoneCount()} / ${visibleModules().length}</div><div class="bar"><span style="width:${visibleModules().length?Math.round(visibleDoneCount()/visibleModules().length*100):0}%"></span></div><p>Лучший тест: ${state.best===null?'ещё не пройден':state.best+'%'}</p></div></div><div class="card" style="margin-top:20px"><h2>Подробное пособие по вашему перечню тем</h2><p>Внутри ${modules.reduce((n,m)=>n+m.sections.length,0)} разделов: устройство и подбор, характеристики и авторитет, Kv/Cv, FL, кавитация, уплотнения, приводы, позиционеры, ГОСТы, фланцы, диагностика, ремонт и испытания. Есть расчётные примеры, инженерные таблицы и пять комплексных кейсов. Можно записывать решения и возвращаться к ним позже.</p><p class="muted">Указанные академические часы — проект продолжительности курса, включая практику с наставником. Текст этого файла сам по себе не составляет 150 часов обучения.</p><div class="actions"><button onclick="nav('modules')">Открыть модули</button><button class="secondary" onclick="openLesson(${firstVisible()})">Начать первый урок</button></div></div><div class="notice">${storageOK?'Прогресс и ответы сохраняются в этом браузере. Очистка данных может удалить их.':'Хранилище недоступно. Данные останутся только в памяти страницы.'} ${window.CAN_EDIT ? 'Есть встроенный редактор: откройте пункт «Редактор книги».' : ''} Для вошедших сотрудников прогресс и ответы дополнительно сохраняются в системе и видны наставнику. Это подробный универсальный учебный материал, а не утверждённая инструкция для конкретного оборудования. Нормативные таблицы и полные тексты стандартов не включены. Для материалов старой версии используется отдельный ключ хранения; прежний прогресс не импортируется.</div><button class="secondary" onclick="resetProgress()">Сбросить прогресс</button>`}
-function catalog(){ $('#view').innerHTML=`<p class="muted">Выберите урок. Назначенное время включает задания и практику, а не только чтение.</p><label for="search">Поиск по содержанию</label><input id="search" class="search" placeholder="Например: кавитация, прокладка, затвор"><div id="catalog" class="grid"></div>`;drawCatalog('');$('#search').addEventListener('input',e=>drawCatalog(e.target.value))}
-function drawCatalog(query){const q=query.toLowerCase();const list=modules.map((m,i)=>({m,i})).filter(({m,i})=>allowed(i)&&JSON.stringify(m).toLowerCase().includes(q));$('#catalog').innerHTML=list.length?list.map(({m:raw,i})=>{const m=cleanModule(raw);return `<article class="card"><span class="pill">Модуль ${i+1} · ${m.hours} акад. ч</span><h2>${m.title}</h2><p>${m.goal}</p><p class="reading">${m.sections.length} разделов · таблица · задача · разбор</p><button onclick="openLesson(${i})">${state.done.includes(i)?'✓ Изучено · открыть':'Изучить модуль'}</button></article>`}).join(''):'<p>Совпадений нет.</p>'}
+function catalog(){ $('#view').innerHTML=`<p class="muted">Выберите урок. Назначенное время включает задания и практику, а не только чтение.</p><div class="toolbar"><input id="search" class="search" style="margin-bottom:0" placeholder="Поиск: кавитация, прокладка, затвор, Kv…"><label class="check-all" style="margin:0"><input type="checkbox" id="fav-only"> Только избранное</label></div><div id="catalog" class="grid"></div>`;$('#search').addEventListener('input',()=>drawCatalog());$('#fav-only').addEventListener('change',()=>drawCatalog());drawCatalog()}
+function moduleSearchText(m){return [m.title,m.goal,m.task,m.answer,(m.checks||[]).join(' '),(m.sections||[]).map(s=>(s[0]||'')+' '+(s[1]||'')).join(' '),(m.table||[]).flat().join(' ')].join(' ').toLowerCase()}
+function drawCatalog(){const q=($('#search')&&$('#search').value||'').toLowerCase();const favOnly=$('#fav-only')&&$('#fav-only').checked;const list=modules.map((m,i)=>({m,i})).filter(({m,i})=>allowed(i)&&(!favOnly||state.bookmarks.includes(i))&&moduleSearchText(m).includes(q));$('#catalog').innerHTML=list.length?list.map(({m:raw,i})=>{const m=cleanModule(raw);return `<article class="card"><span class="pill">Модуль ${i+1} · ${m.hours} акад. ч${state.bookmarks.includes(i)?' · ★':''}</span><h2>${m.title}</h2><p>${m.goal}</p><p class="reading">${m.sections.length} разделов · таблица · задача · разбор</p><button onclick="openLesson(${i})">${state.done.includes(i)?'✓ Изучено · открыть':'Изучить модуль'}</button></article>`}).join(''):'<p>Совпадений нет.</p>'}
 function table(rows){return `<div class="tablewrap"><table><thead><tr>${rows[0].map(t=>`<th scope="col">${t}</th>`).join('')}</tr></thead><tbody>${rows.slice(1).map(row=>`<tr>${row.map(t=>`<td>${t}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`}
-function openLesson(i){if(!allowed(i)){i=firstVisible()}activeModule=i;current='modules';$('#nav').innerHTML=pages.map(([k,t])=>`<button data-page="${k}" class="${k===current?'active':''}">${t}</button>`).join('');const m=cleanModule(modules[i]);$('#title').textContent=modules[i].title;$('#view').innerHTML=`<div class="lesson"><div class="actions" style="margin:0 0 18px"><button class="secondary" onclick="nav('modules')">← Все модули</button><button class="secondary" onclick="window.print()">Печать урока</button><button class="secondary" onclick="showAll()">Весь учебник</button>${window.CAN_EDIT ? `<button class="secondary" onclick="editorIndex=activeModule;nav('editor')">✎ Изменить главу</button>` : ''}</div><div class="card"><span class="pill">Модуль ${i+1} · ${m.hours} акад. ч с практикой</span><h2>Цель</h2><p>${m.goal}</p><div class="toc">${m.sections.map((s,j)=>`<a href="#section-${j}">${j+1}. ${s[0]}</a>`).join('')}<a href="#task">Практика</a></div></div>${m.sections.map((s,j)=>`<section id="section-${j}" class="card section"><div class="eyebrow">Раздел ${j+1}</div><h2>${s[0]}</h2><p>${s[1]}</p>${figureList((s[2]||[]).map(x=>({data:x[0],caption:x[1]})))}</section>`).join('')}${figureList((m.images||[]).map(x=>({data:x[0],caption:x[1]})))}${lessonVisual(i)}<div class="card"><h2>Инженерная памятка</h2>${table(m.table)}</div><section id="task" class="card section"><h2>Практическое задание</h2><p>${m.task}</p><label for="notes">Ваше решение</label><textarea id="notes" maxlength="15000" placeholder="Гипотезы, исходные данные, проверки, основания и ограничения…">${escapeHTML(state.notes[i]||'')}</textarea><div class="actions"><button id="save-notes">Сохранить ответ</button><span id="save-status" role="status"></span></div><details><summary>Показать разбор и критерии ответа</summary><p style="margin-top:14px">${m.answer}</p></details></section><div class="card"><h2>Проверьте себя</h2><ol>${m.checks.map(t=>`<li>${t}</li>`).join('')}</ol>${lessonSources(i)}<div class="notice">Отвечайте с обоснованием. Самостоятельная отметка не означает, что навык проверен наставником.</div><div class="actions"><button onclick="toggleDone(${i})">${state.done.includes(i)?'Снять отметку «изучено»':'Отметить как изученное'}</button>${nextVisible(i)>=0?`<button class="secondary" onclick="openLesson(${nextVisible(i)})">Следующий модуль →</button>`:''}</div></div></div>`;$('#save-notes').addEventListener('click',()=>{state.notes[i]=$('#notes').value;$('#save-status').textContent=save()?'Сохранено в этом браузере.':'Ответ в памяти страницы; постоянное хранение недоступно.';pushNotes(i)});$('#notes').addEventListener('input',()=>{state.notes[i]=$('#notes').value;save();pushNotes(i)});window.scrollTo(0,0)}
-function toggleDone(i){state.done=state.done.includes(i)?state.done.filter(x=>x!==i):[...state.done,i];save();pushProgress(i);openLesson(i)}
-function resetProgress(){if(confirm('Удалить ответы, отметки и результат теста в этом браузере?')){state={done:[],notes:{},best:null};save();home()}}
+function openLesson(i){if(!allowed(i)){i=firstVisible()}activeModule=i;current='modules';$('#nav').innerHTML=pages.map(([k,t])=>`<button data-page="${k}" class="${k===current?'active':''}">${t}</button>`).join('');const m=cleanModule(modules[i]);$('#title').textContent=modules[i].title;$('#view').innerHTML=`<div class="lesson"><div class="actions" style="margin:0 0 18px"><button class="secondary" onclick="nav('modules')">← Все модули</button><button class="secondary" onclick="window.print()">Печать урока</button><button class="secondary" onclick="showAll()">Весь учебник</button><button class="secondary" onclick="toggleBookmark(${i})">${state.bookmarks.includes(i)?'★ В избранном':'☆ В избранное'}</button>${window.CAN_EDIT ? `<button class="secondary" onclick="editorIndex=activeModule;nav('editor')">✎ Изменить главу</button>` : ''}</div><div class="card"><span class="pill">Модуль ${i+1} · ${m.hours} акад. ч с практикой</span><h2>Цель</h2><p>${m.goal}</p><div class="toc">${m.sections.map((s,j)=>`<a href="#section-${j}">${j+1}. ${s[0]}</a>`).join('')}<a href="#task">Практика</a></div></div>${m.sections.map((s,j)=>`<section id="section-${j}" class="card section"><div class="eyebrow">Раздел ${j+1}</div><h2>${s[0]}</h2>${renderSectionContent(s)}</section>`).join('')}${figureList((m.images||[]).map(x=>({data:x[0],caption:x[1]})))}${lessonVisual(i)}<div class="card"><h2>Инженерная памятка</h2>${table(m.table)}</div><section id="task" class="card section"><h2>Практическое задание</h2><p>${m.task}</p><label for="notes">Ваше решение</label><textarea id="notes" maxlength="15000" placeholder="Гипотезы, исходные данные, проверки, основания и ограничения…">${escapeHTML(state.notes[i]||'')}</textarea><div class="actions"><button id="save-notes">Сохранить ответ</button><span id="save-status" role="status"></span></div><details><summary>Показать разбор и критерии ответа</summary><p style="margin-top:14px">${m.answer}</p></details></section><div class="card"><h2>Проверьте себя</h2><ol>${m.checks.map(t=>`<li>${t}</li>`).join('')}</ol>${lessonSources(i)}<div class="notice">Отвечайте с обоснованием. Самостоятельная отметка не означает, что навык проверен наставником.</div><div class="actions"><button onclick="toggleDone(${i})">${state.done.includes(i)?'Снять отметку «изучено»':'Отметить как изученное'}</button>${nextVisible(i)>=0?`<button class="secondary" onclick="openLesson(${nextVisible(i)})">Следующий модуль →</button>`:''}</div></div></div>`;$('#save-notes').addEventListener('click',()=>{state.notes[i]=$('#notes').value;$('#save-status').textContent=save()?'Сохранено в этом браузере.':'Ответ в памяти страницы; постоянное хранение недоступно.';pushNotes(i)});$('#notes').addEventListener('input',()=>{state.notes[i]=$('#notes').value;save();pushNotes(i)});window.scrollTo(0,0)}
+function toggleDone(i){const wasDone=state.done.includes(i);state.done=wasDone?state.done.filter(x=>x!==i):[...state.done,i];save();if(wasDone){resetCloud(i)}else{pushProgress(i)}openLesson(i)}
+function toggleBookmark(i){state.bookmarks=state.bookmarks.includes(i)?state.bookmarks.filter(x=>x!==i):[...state.bookmarks,i];save();openLesson(i)}
+function resetProgress(){if(confirm('Удалить ответы, отметки, закладки и результат теста в этом браузере?')){state={done:[],notes:{},bookmarks:[],best:null};save();home()}}
 const norms=BOOK.standards;
-function standards(){$('#view').innerHTML=`<div class="notice">Это стартовый справочный перечень, не реестр действующих редакций. Проверяйте статус, изменения и область применения в уполномоченной нормативной базе страны эксплуатации. Полные тексты не включены. Ссылки на публикации не подтверждают их актуальность.</div><div class="card">${table([['Документ','Название','Публикация'],...norms.map(n=>[n[0],n[1],n[2]?`<a href="${n[2]}" target="_blank" rel="noopener noreferrer">Открыть ↗</a>`:'Найти в нормативной базе'])])}</div><div class="card"><h2>Шаблон карты требований</h2>${table([['Показатель','Критерий','Источник и пункт','Метод','Результат'],['Герметичность затвора','Из документации изделия','Указать редакцию и пункт','По программе','Значение и единицы'],['Размер детали','Из чертежа / ремонтного документа','Указать обозначение','Утверждённый метод','Измеренное значение']])}</div>`}
+function standards(){$('#view').innerHTML=`<div class="notice">Это стартовый справочный перечень, не реестр действующих редакций. Проверяйте статус, изменения и область применения в уполномоченной нормативной базе страны эксплуатации. Полные тексты не включены. Ссылки на публикации не подтверждают их актуальность.</div><div class="card">${table([['Документ','Название','Публикация'],...norms.map(n=>[escapeHTML(n[0]),escapeHTML(n[1]),isHttpUrl(n[2])?`<a href="${escapeHTML(n[2])}" target="_blank" rel="noopener noreferrer">Открыть ↗</a>`:'Найти в нормативной базе'])])}</div><div class="card"><h2>Шаблон карты требований</h2>${table([['Показатель','Критерий','Источник и пункт','Метод','Результат'],['Герметичность затвора','Из документации изделия','Указать редакцию и пункт','По программе','Значение и единицы'],['Размер детали','Из чертежа / ремонтного документа','Указать обозначение','Утверждённый метод','Измеренное значение']])}</div>`}
+function glossary(){
+  $('#view').innerHTML=`<p class="muted">Краткий словарь терминов курса. Нормативные определения сверяйте с действующими стандартами.</p><input id="glossary-search" class="search" placeholder="Поиск термина"><div id="glossary-list"></div>`;
+  const renderGlossary=()=>{
+    const q=($('#glossary-search').value||'').toLowerCase();
+    const terms=BOOK.glossary||[];
+    const list=terms.filter(t=>!q||String(t[0]).toLowerCase().includes(q)||String(t[1]).toLowerCase().includes(q));
+    $('#glossary-list').innerHTML=list.length?list.map(t=>`<div class="card"><h2>${escapeHTML(t[0])}</h2><p>${escapeHTML(t[1])}</p></div>`).join(''):'<p>Терминов не найдено.</p>';
+  };
+  $('#glossary-search').addEventListener('input',renderGlossary);
+  renderGlossary();
+}
 function calc(){
   const materialOptions=Object.entries(STEEL_GROUPS).map(([k,g])=>`<option value="${k}">${g.label}</option>`).join('');
   const mediumOptions=Object.entries(MEDIUM_PRESETS).map(([k,m])=>`<option value="${k}">${m.label}</option>`).join('');
@@ -146,6 +169,7 @@ function calc(){
       <button class="calc-tab" data-calc-tab="flange" role="tab" aria-selected="false">Фланец и прокладка</button>
       <button class="calc-tab" data-calc-tab="pn" role="tab" aria-selected="false">PN по температуре</button>
       <button class="calc-tab" data-calc-tab="dn" role="tab" aria-selected="false">DN по расходу</button>
+      <button class="calc-tab" data-calc-tab="units" role="tab" aria-selected="false">Пересчёт единиц</button>
     </div>
     <section class="calc-panel" id="calc-panel-kv" role="tabpanel">
       <div class="grid">
@@ -247,6 +271,35 @@ function calc(){
       </div>
       <div class="notice">Расчёт по формуле D = √(4Q/(πv)) с переводом единиц. Для газа и пара нужен фактический объёмный расход при рабочих условиях. Диаметр не учитывает потери давления, кавитацию, допустимую скорость по проекту и требования безопасности.</div>
     </section>
+    <section class="calc-panel" id="calc-panel-units" role="tabpanel" hidden>
+      <div class="grid">
+        <form class="card" id="units-kv">
+          <h2>Kv ↔ Cv</h2>
+          <div class="field"><label for="u-kv">Kv (м³/ч при 1 бар)</label><input id="u-kv" type="number" step="any" value="10"></div>
+          <div class="field"><label for="u-cv">Cv (US gpm при 1 psi)</label><input id="u-cv" type="number" step="any"></div>
+          <p class="small muted">Cv = Kv · 1,156 (вода при 15,6 °C). Для газов и пара коэффициент отличается.</p>
+        </form>
+        <form class="card" id="units-pressure">
+          <h2>Давление</h2>
+          <div class="field"><label for="u-pv">Значение</label><input id="u-pv" type="number" step="any" value="1"></div>
+          <div class="field"><label for="u-pf">Из</label><select id="u-pf"><option value="mpa">МПа</option><option value="bar">бар</option><option value="kgfcm2">кгс/см²</option><option value="psi">psi</option><option value="kpa">кПа</option><option value="atm">атм</option></select></div>
+          <div class="field"><label for="u-pt">В</label><select id="u-pt"><option value="bar">бар</option><option value="mpa">МПа</option><option value="kgfcm2">кгс/см²</option><option value="psi">psi</option><option value="kpa">кПа</option><option value="atm">атм</option></select></div>
+          <div class="stat" id="u-pressure-result" style="font-size:22px">—</div>
+        </form>
+        <form class="card" id="units-temp">
+          <h2>Температура</h2>
+          <div class="field"><label for="u-tv">Значение</label><input id="u-tv" type="number" step="any" value="20"></div>
+          <div class="field"><label for="u-tf">Из</label><select id="u-tf"><option value="c">°C</option><option value="k">K</option><option value="f">°F</option></select></div>
+          <div class="field"><label for="u-tt">В</label><select id="u-tt"><option value="f">°F</option><option value="c">°C</option><option value="k">K</option></select></div>
+          <div class="stat" id="u-temp-result" style="font-size:22px">—</div>
+        </form>
+      </div>
+      <div class="card">
+        <h2>DN: дюймы ↔ мм</h2>
+        ${table([['Дюймы','DN, мм'],...DN_INCH.map(x=>[x[0],x[1]])])}
+        <p class="small muted">Стандартный ряд условных проходов (приблизительное соответствие).</p>
+      </div>
+    </section>
   `;
   document.querySelectorAll('[data-calc-tab]').forEach(btn=>{
     btn.addEventListener('click',()=>{
@@ -333,6 +386,15 @@ function calc(){
   };
   $('#dn-form').addEventListener('submit',e=>{e.preventDefault();runDn();});
   runDn();
+  // Пересчёт единиц: Kv↔Cv, давление, температура, DN (дюймы↔мм).
+  ['units-kv','units-pressure','units-temp'].forEach(id=>{const f=document.getElementById(id);if(f)f.addEventListener('submit',e=>e.preventDefault());});
+  const uKv=$('#u-kv'),uCv=$('#u-cv');
+  uKv.addEventListener('input',()=>{const v=kvToCv(Number(uKv.value));uCv.value=v===null?'':String(Math.round(v*1000)/1000);});
+  uCv.addEventListener('input',()=>{const v=cvToKv(Number(uCv.value));uKv.value=v===null?'':String(Math.round(v*1000)/1000);});
+  const runPressure=()=>{const v=convertPressure($('#u-pv').value,$('#u-pf').value,$('#u-pt').value);$('#u-pressure-result').textContent=v===null?'—':fmtNum(v,4);};
+  $('#units-pressure').addEventListener('input',runPressure);runPressure();
+  const runTemp=()=>{const v=convertTemperature($('#u-tv').value,$('#u-tf').value,$('#u-tt').value);$('#u-temp-result').textContent=v===null?'—':fmtNum(v,2);};
+  $('#units-temp').addEventListener('input',runTemp);runTemp();
 }
 
 function calcList(items){
@@ -411,15 +473,45 @@ let quizQuestions=[];
 let qi=0,score=0,locked=false;
 function shuffle(a){const b=a.slice();for(let i=b.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[b[i],b[j]]=[b[j],b[i]]}return b}
 function startQuiz(){quizQuestions=shuffle(questions).slice(0,QUIZ_SIZE);qi=0;score=0;showQuestion()}
-function showQuestion(){locked=false;const q=quizQuestions[qi];$('#view').innerHTML=`<div class="card"><span class="pill">Вопрос ${qi+1} из ${quizQuestions.length}</span><div class="bar"><span style="width:${qi/quizQuestions.length*100}%"></span></div><h2>${q[0]}</h2>${q[1].map((o,i)=>`<button class="option" onclick="answerQuiz(${i})">${o}</button>`).join('')}<div id="feedback" aria-live="polite"></div></div><p class="muted">Это учебная самопроверка: ${QUIZ_SIZE} случайных вопросов из ${questions.length}. Допускается не более ${QUIZ_ALLOWED_ERRORS} ошибок.</p>`}
-function answerQuiz(i){if(locked)return;locked=true;const q=quizQuestions[qi],ok=i===q[2];if(ok)score++;document.querySelectorAll('.option').forEach(b=>b.disabled=true);$('#feedback').innerHTML=`<div class="${ok?'good':'bad'}"><b>${ok?'Верно.':'Неверно.'}</b> ${q[3]} ${ok?'':'Правильный ответ: '+q[1][q[2]]+'.'}</div><div class="actions"><button onclick="nextQuestion()">${qi===quizQuestions.length-1?'Результат':'Далее'}</button></div>`}
+function showQuestion(){locked=false;const q=quizQuestions[qi];$('#view').innerHTML=`<div class="card"><span class="pill">Вопрос ${qi+1} из ${quizQuestions.length}</span><div class="bar"><span style="width:${qi/quizQuestions.length*100}%"></span></div><h2>${escapeHTML(q[0])}</h2>${q[1].map((o,i)=>`<button class="option" onclick="answerQuiz(${i})">${escapeHTML(o)}</button>`).join('')}<div id="feedback" aria-live="polite"></div></div><p class="muted">Это учебная самопроверка: ${QUIZ_SIZE} случайных вопросов из ${questions.length}. Допускается не более ${QUIZ_ALLOWED_ERRORS} ошибок.</p>`}
+function answerQuiz(i){if(locked)return;locked=true;const q=quizQuestions[qi],ok=i===q[2];if(ok)score++;document.querySelectorAll('.option').forEach(b=>b.disabled=true);$('#feedback').innerHTML=`<div class="${ok?'good':'bad'}"><b>${ok?'Верно.':'Неверно.'}</b> ${escapeHTML(q[3])} ${ok?'':'Правильный ответ: '+escapeHTML(q[1][q[2]])+'.'}</div><div class="actions"><button onclick="nextQuestion()">${qi===quizQuestions.length-1?'Результат':'Далее'}</button></div>`}
 function nextQuestion(){if(!locked)return;qi++;if(qi<quizQuestions.length){showQuestion();return}const errors=quizQuestions.length-score;const pct=Math.round(score/quizQuestions.length*100);const passed=errors<=QUIZ_ALLOWED_ERRORS;state.best=Math.max(state.best??0,pct);save();pushQuiz(pct);$('#view').innerHTML=`<div class="card"><h2>Тест завершён</h2><div class="stat">${pct}%</div><p>${score} из ${quizQuestions.length} правильных ответов (${errors} ошибок).</p><div class="${passed?'good':'bad'}"><b>${passed?'Зачёт: ошибок не больше '+QUIZ_ALLOWED_ERRORS+' из '+QUIZ_SIZE+'.':'Не зачтено: допускается не более '+QUIZ_ALLOWED_ERRORS+' ошибок.'}</b></div><div class="notice">Результат не подтверждает практические навыки или допуск к работам. Разберите ошибки с наставником.</div><div class="actions"><button onclick="startQuiz()">Пройти снова</button><button class="secondary" onclick="nav('modules')">К учебным модулям</button></div></div>`}
 
-function lessonSources(i){const m=modules[i];return (m.links||[]).length?`<details><summary>Источники</summary><ul>${m.links.map(l=>`<li><a href="${escapeHTML(l[1])}" target="_blank" rel="noopener noreferrer">${escapeHTML(l[0])}</a></li>`).join('')}</ul></details>`:''}
-function figureList(list){return (list||[]).filter(x=>x&&typeof x.data==='string'&&/^(images\/|graphics\/|data:image\/(png|jpeg|webp|svg\+xml);base64,|https:\/\/)/.test(x.data)).map(x=>`<figure class="card"><img style="max-width:100%;height:auto" src="${escapeHTML(x.data)}" alt="${escapeHTML(x.caption||'')}" loading="lazy"><figcaption>${escapeHTML(x.caption||'')}</figcaption></figure>`).join('')}
+function lessonSources(i){const m=modules[i];return (m.links||[]).length?`<details><summary>Источники</summary><ul>${m.links.map(l=>`<li><a href="${isHttpUrl(l[1])?escapeHTML(l[1]):''}" target="_blank" rel="noopener noreferrer">${escapeHTML(l[0])}</a></li>`).join('')}</ul></details>`:''}
+function figureList(list){return (list||[]).filter(x=>x&&typeof x.data==='string'&&/^(images\/|graphics\/|data:image\/(png|jpeg|webp);base64,|https:\/\/)/.test(x.data)).map(x=>`<figure class="card"><img style="max-width:100%;height:auto" src="${escapeHTML(x.data)}" alt="${escapeHTML(x.caption||'')}" loading="lazy"><figcaption>${escapeHTML(x.caption||'')}</figcaption></figure>`).join('')}
 function lessonVisual(i){const m=modules[i];const urls=[...(m.graphic?[{data:m.graphic,caption:'Учебная схема'}]:[]),...(m.images||[])];return urls.filter(x=>/^(images\/|graphics\/|data:image\/(png|jpeg|webp);base64,)/.test(x.data)).map(x=>`<figure class="card"><img style="max-width:100%;height:auto" src="${escapeHTML(x.data)}" alt="${escapeHTML(x.caption)}"><figcaption>${escapeHTML(x.caption)}</figcaption></figure>`).join('')}
-function showAll(){ $('#title').textContent='Полный учебник';$('#view').innerHTML=`<div class="actions"><button onclick="nav('modules')">К модулям</button><button class="secondary" onclick="window.print()">Печать всего учебника</button></div><div class="notice">${modules.reduce((n,m)=>n+m.hours,0)} часов — проект учебного плана с практикой. Текст не заменяет руководство изделия и актуальную нормативную базу.</div><div class="lesson">${modules.map((raw,i)=>({raw,i})).filter(x=>allowed(x.i)).map(({raw,i})=>{const m=cleanModule(raw);return `<article class="card"><span class="pill">Модуль ${i+1}</span><h2>${m.title}</h2><p><b>Цель:</b> ${m.goal}</p>${m.sections.map(s=>`<h3>${s[0]}</h3><p>${s[1]}</p>${figureList((s[2]||[]).map(x=>({data:x[0],caption:x[1]})))}`).join('')}${figureList((m.images||[]).map(x=>({data:x[0],caption:x[1]})))}${table(m.table)}<h3>Практическое задание</h3><p>${m.task}</p><h3>Разбор</h3><p>${m.answer}</p><h3>Самопроверка</h3><ol>${m.checks.map(c=>`<li>${c}</li>`).join('')}</ol>${lessonVisual(i)}${lessonSources(i)}</article>`}).join('')}</div>`;window.scrollTo(0,0)}
+function videoEmbed(url){if(typeof url!=='string')return null;const u=url.trim();let m=u.match(/(?:youtube\.com\/(?:watch\?(?:[^#]*&)?v=|embed\/|shorts\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/);if(m)return `<iframe class="video-frame" src="https://www.youtube.com/embed/${m[1]}" title="Видео" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen loading="lazy"></iframe>`;m=u.match(/(?:vk\.com|vkvideo\.ru)\/video(-?\d+)_(\d+)/);if(m)return `<iframe class="video-frame" src="https://vk.com/video_ext.php?oid=${m[1]}&id=${m[2]}&hd=2" title="Видео" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen loading="lazy"></iframe>`;m=u.match(/rutube\.ru\/(?:video\/(?:private\/)?|play\/embed\/)([A-Za-z0-9]{6,})/);if(m)return `<iframe class="video-frame" src="https://rutube.ru/play/embed/${m[1]}" title="Видео" allow="clipboard-write; autoplay; fullscreen; picture-in-picture" allowfullscreen loading="lazy"></iframe>`;return null}
+function renderSectionContent(s){const blocks=Array.isArray(s[4])?s[4]:null;if(!blocks){return `<p>${s[1]||''}</p>${(s[2]||[]).map(x=>`<figure class="card"><img style="max-width:100%;height:auto" src="${isImageUrl(x[0])?x[0]:''}" alt="" loading="lazy"><figcaption>${x[1]||''}</figcaption></figure>`).join('')}`}return blocks.map(b=>{if(b.t==='text')return `<p>${(b.x||'').replace(/\n/g,'<br>')}</p>`;if(b.t==='image')return `<figure class="card"><img style="max-width:100%;height:auto" src="${isImageUrl(b.src)?b.src:''}" alt="${b.cap||''}" loading="lazy"><figcaption>${b.cap||''}</figcaption></figure>`;if(b.t==='video'){const emb=videoEmbed(b.src);if(emb)return `<figure class="card"><div class="video-wrap">${emb}</div>${b.cap?`<figcaption>${b.cap}</figcaption>`:''}</figure>`;return `<p><a href="${isHttpUrl(b.src)?b.src:''}" target="_blank" rel="noopener noreferrer">Смотреть видео${b.cap?': '+b.cap:''}</a></p>`}return ''}).join('')}
+function showAll(){ $('#title').textContent='Полный учебник';$('#view').innerHTML=`<div class="actions"><button onclick="nav('modules')">К модулям</button><button class="secondary" onclick="window.print()">Печать всего учебника</button></div><div class="notice">${modules.reduce((n,m)=>n+m.hours,0)} часов — проект учебного плана с практикой. Текст не заменяет руководство изделия и актуальную нормативную базу.</div><div class="lesson">${modules.map((raw,i)=>({raw,i})).filter(x=>allowed(x.i)).map(({raw,i})=>{const m=cleanModule(raw);return `<article class="card"><span class="pill">Модуль ${i+1}</span><h2>${m.title}</h2><p><b>Цель:</b> ${m.goal}</p>${m.sections.map(s=>`<h3>${s[0]}</h3>${renderSectionContent(s)}`).join('')}${figureList((m.images||[]).map(x=>({data:x[0],caption:x[1]})))}${table(m.table)}<h3>Практическое задание</h3><p>${m.task}</p><h3>Разбор</h3><p>${m.answer}</p><h3>Самопроверка</h3><ol>${m.checks.map(c=>`<li>${c}</li>`).join('')}</ol>${lessonVisual(i)}${lessonSources(i)}</article>`}).join('')}</div>`;window.scrollTo(0,0)}
 
 initCloud();
+
+// Лайтбокс: клик по картинке открывает её на весь экран (ESC или клик — закрыть).
+(function initLightbox(){
+  let box=null;
+  function close(){if(box){box.classList.remove('open');document.body.style.overflow='';}}
+  function open(src,alt){
+    if(!box){
+      box=document.createElement('div');
+      box.className='lightbox';
+      box.setAttribute('role','dialog');
+      box.setAttribute('aria-label','Просмотр изображения');
+      box.innerHTML='<img alt=""><div class="lightbox-cap"></div><button class="lightbox-close" type="button" aria-label="Закрыть">✕</button>';
+      box.addEventListener('click',close);
+      box.querySelector('.lightbox-close').addEventListener('click',e=>{e.stopPropagation();close();});
+      document.body.append(box);
+    }
+    box.querySelector('img').src=src;
+    box.querySelector('img').alt=alt||'';
+    box.querySelector('.lightbox-cap').textContent=alt||'';
+    box.classList.add('open');
+    document.body.style.overflow='hidden';
+  }
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')close();});
+  document.addEventListener('click',e=>{
+    const img=e.target.closest('figure img, .image-card img');
+    if(img&&img.src)open(img.src,img.alt||'');
+  });
+})();
 
 

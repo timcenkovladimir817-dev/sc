@@ -773,3 +773,42 @@ function calcPipelineDn(flowM3h,velocity,mediumKey){
   const actualVelocity=dn?Math.pow(18.8/dn,2)*q:null;
   return {d,dn,actualVelocity,medium,flow:q,velocity:v};
 }
+
+/* --------------------------------------------------------------------------
+ * Пересчёт единиц: Kv↔Cv, давление, температура, DN (дюймы↔мм)
+ * ------------------------------------------------------------------------ */
+
+// Kv (м³/ч при Δp=1 бар) и Cv (US gpm при Δp=1 psi) для воды при 15,6 °C.
+function kvToCv(kv){const v=Number(kv);return Number.isFinite(v)?v*1.156:null}
+function cvToKv(cv){const v=Number(cv);return Number.isFinite(v)?v/1.156:null}
+
+const PRESSURE_TO_MPA={mpa:1,bar:0.1,kgfcm2:0.0980665,psi:0.006894757,kpa:0.001,atm:0.101325};
+
+function convertPressure(value,from,to){
+  const v=Number(value);
+  if(!Number.isFinite(v))return null;
+  const a=PRESSURE_TO_MPA[from],b=PRESSURE_TO_MPA[to];
+  if(a===undefined||b===undefined||b===0)return null;
+  return v*a/b;
+}
+
+function convertTemperature(value,from,to){
+  const v=Number(value);
+  if(!Number.isFinite(v))return null;
+  let c;
+  if(from==='c')c=v;
+  else if(from==='k')c=v-273.15;
+  else if(from==='f')c=(v-32)*5/9;
+  else return null;
+  if(to==='c')return c;
+  if(to==='k')return c+273.15;
+  if(to==='f')return c*9/5+32;
+  return null;
+}
+
+const DN_INCH=[
+  ['1/4"','8'],['3/8"','10'],['1/2"','15'],['3/4"','20'],['1"','25'],['1 1/4"','32'],
+  ['1 1/2"','40'],['2"','50'],['2 1/2"','65'],['3"','80'],['4"','100'],['5"','125'],
+  ['6"','150'],['8"','200'],['10"','250'],['12"','300'],['14"','350'],['16"','400'],
+  ['18"','450'],['20"','500'],['24"','600']
+];

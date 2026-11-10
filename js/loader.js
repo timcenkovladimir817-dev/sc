@@ -42,6 +42,8 @@ window.__appReady = (async () => {
           '<div class="card"><h2>Курс не назначен</h2><p>Вам ещё не назначен учебный курс. Обратитесь к наставнику или администратору обучения.</p><p><a href="login.html">Войти под другой учётной записью</a></p></div>';
         return;
       }
+      // Активное назначение: прогресс пишется в него (не в «самое старое»).
+      window.ACTIVE_ENROLLMENT = active.id;
       // Назначенные главы (блоки). Пустой набор = весь курс.
       try {
         const { data: assigned, error: assignedError } = await window.sb
@@ -56,7 +58,8 @@ window.__appReady = (async () => {
     const get = async p => { const r = await fetch(p, { cache: 'no-store' }); if (!r.ok) throw Error(p + ': ' + r.status); return r.json(); };
     const manifest = await get('content/book.json');
     const modules = await Promise.all(manifest.modules.map(get));
-    window.BOOK = { manifest, modules, source: 'json', standards: await get('content/standards.json'), quiz: await get('content/quiz.json') };
+    const glossary = await get('content/glossary.json').catch(() => []);
+    window.BOOK = { manifest, modules, source: 'json', standards: await get('content/standards.json'), quiz: await get('content/quiz.json'), glossary };
     for (const src of ['js/calculations.js', 'js/app.js', 'js/export.js', 'js/editor.js']) {
       await new Promise((resolve, reject) => { const e = document.createElement('script'); e.src = src; e.onload = resolve; e.onerror = () => reject(Error('Не загружен ' + src)); document.body.append(e); });
     }

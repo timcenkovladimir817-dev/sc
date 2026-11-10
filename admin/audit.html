@@ -65,6 +65,7 @@
   `;
 
   const logBox = document.querySelector('#log');
+  let limit = 200;
 
   function fmt(value) {
     if (!value) return '—';
@@ -98,7 +99,7 @@
 
     // Профили читаем отдельно — admin_id в журнале может указывать на удалённого администратора.
     const [logResult, profilesResult] = await Promise.all([
-      sb.from('admin_audit_log').select('*').order('created_at', { ascending: false }).limit(500),
+      sb.from('admin_audit_log').select('*').order('created_at', { ascending: false }).limit(limit + 1),
       sb.from('profiles').select('id, full_name, email'),
     ]);
 
@@ -115,6 +116,8 @@
     const query = document.querySelector('#q').value.trim().toLowerCase();
     const filter = document.querySelector('#filter').value;
     let rows = logResult.data || [];
+    const hasMore = rows.length > limit;
+    if (hasMore) rows = rows.slice(0, limit);
     if (filter !== 'all') rows = rows.filter((item) => item.action === filter);
     if (query) {
       rows = rows.filter((item) => {
@@ -147,7 +150,11 @@
           </td>
         </tr>`;
       }).join('')}</tbody></table></div>
-      <p class="muted small">Показано ${rows.length} записей (не более 500 последних).</p>`;
+      <p class="muted small">Показано ${rows.length} записей${hasMore ? '' : ' (это все записи)'}.</p>
+      ${hasMore ? '<div class="actions"><button type="button" class="secondary" id="load-more">Загрузить ещё</button></div>' : ''}`;
+
+    const moreBtn = logBox.querySelector('#load-more');
+    if (moreBtn) moreBtn.addEventListener('click', () => { limit += 200; load(); });
   }
 
   document.querySelector('#refresh').addEventListener('click', load);

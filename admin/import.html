@@ -23,8 +23,8 @@ button:disabled{opacity:.55;cursor:default}
     <div class="eyebrow">Администрирование обучения</div>
     <h1>Перенести главы из JSON в базу</h1>
     <div class="card">
-      <p>Читает 16 файлов <code>content/modules/*.json</code>, режет каждую главу на блоки
-      (разделы, строки таблиц, задание, разбор, вопросы, ссылки) и записывает их в
+      <p>Читает файлы глав <code>content/modules/*.json</code>, режет каждую главу на блоки
+      (разделы, строки таблиц, задание, разбор, вопросы, ссылки и иллюстрации) и записывает их в
       <code>module_blocks</code> со статусом «опубликовано».</p>
       <div class="notice">Повторный запуск безопасен: старые блоки этой книги удаляются и записываются заново.
       Правки, сделанные в базе вручную, будут потеряны. Ответы читателей не затрагиваются.</div>
@@ -77,6 +77,18 @@ button:disabled{opacity:.55;cursor:default}
         add('answer', 0, { text: m.answer });
         m.checks.forEach((t, j) => add('check', j, { text: t }));
         (m.links || []).forEach((l, j) => add('link', j, { label: l[0], url: l[1] }));
+        // Иллюстрации главы (module.images) и раздела (sections[2]).
+        (m.images || []).forEach((img, j) => {
+          if (img && typeof img.data === 'string' && img.data) {
+            add('image', j, { url: img.data, caption: img.caption || '' });
+          }
+        });
+        if (m.graphic) add('image', 0, { url: m.graphic, caption: 'Учебная схема' });
+        m.sections.forEach((s, j) => {
+          (s[2] || []).forEach((img) => {
+            if (img && img[0]) add('image', j, { url: img[0], caption: img[1] || '', section: j });
+          });
+        });
       }
       say('блоков к записи: ' + rows.length, 'b');
 

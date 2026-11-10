@@ -8,6 +8,7 @@
 <script src="../js/config.js"></script>
 <script src="../js/vendor/supabase.js"></script>
 <script src="../js/supabase-client.js"></script>
+<script src="../js/admin-common.js"></script>
 <script src="../js/admin-nav.js"></script>
 <script>
 (async () => {
@@ -112,33 +113,14 @@ returning id, email, role;</pre>
 
   function clearMsg() { msg.hidden = true; msg.innerHTML = ''; }
 
-  function escText(value) { return esc(value); }
-
-  const roleNames = { admin: 'Администратор', teacher: 'Наставник', student: 'Сотрудник' };
-  const statusNames = {
-    assigned: 'Назначено', in_progress: 'В работе', completed: 'Завершено', cancelled: 'Отменено',
-  };
+  const escText = AdminCommon.escText;
+  const roleNames = AdminCommon.roleNames;
+  const statusNames = AdminCommon.statusNames;
   const inviteNames = { pending: 'Ожидает входа', accepted: 'Принято', revoked: 'Отозвано' };
-
-  function roleName(role) { return roleNames[role] || role || 'Не задана'; }
-
-  function fmtDate(value) {
-    if (!value) return '—';
-    const date = new Date(value.length === 10 ? value + 'T00:00:00' : value);
-    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString('ru-RU');
-  }
-
-  function todayStart() {
-    const date = new Date();
-    date.setHours(0, 0, 0, 0);
-    return date;
-  }
-
-  function isOverdue(enrollment) {
-    if (!enrollment || !enrollment.due_date) return false;
-    if (enrollment.status === 'completed' || enrollment.status === 'cancelled') return false;
-    return new Date(enrollment.due_date + 'T00:00:00') < todayStart();
-  }
+  const roleName = AdminCommon.roleName;
+  const fmtDate = AdminCommon.fmtDate;
+  const todayStart = AdminCommon.todayStart;
+  const isOverdue = AdminCommon.isOverdue;
 
   function courseName(id) {
     const course = state.courses.find((item) => item.id === id);
@@ -182,25 +164,9 @@ returning id, email, role;</pre>
       `<option value="${escText(value)}"${value === current ? ' selected' : ''}>${escText(label)}</option>`).join('');
   }
 
-  function progressBar(percent) {
-    const value = Math.max(0, Math.min(100, Number(percent) || 0));
-    return `<div class="progress-mini" title="Прогресс ${value}%"><span style="width:${value}%"></span></div>`;
-  }
-
-  function statusBadge(status) {
-    const cls = status === 'completed' ? 'ok' : status === 'in_progress' ? 'warn'
-      : status === 'cancelled' ? 'muted' : '';
-    return `<span class="badge ${cls}">${escText(statusNames[status] || status || '—')}</span>`;
-  }
-
-  async function selectAll(table, order) {
-    let result = order
-      ? await sb.from(table).select('*').order(order, { ascending: false })
-      : await sb.from(table).select('*');
-    // На случай другой версии схемы: повторяем без сортировки, если колонки нет.
-    if (result.error && order) result = await sb.from(table).select('*');
-    return result;
-  }
+  const progressBar = AdminCommon.progressBar;
+  const statusBadge = AdminCommon.statusBadge;
+  const selectAll = AdminCommon.selectAll;
 
   async function load() {
     clearMsg();

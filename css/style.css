@@ -65,7 +65,7 @@ a:hover { text-decoration: underline; }
 
 aside {
   background: #15243e;
-  padding: 25px 17px;
+  padding: 26px 20px;
   color: white;
 }
 
@@ -91,10 +91,11 @@ nav button.active, nav button:hover {
 }
 
 main {
-  padding: 28px 38px;
+  padding: 28px 40px;
   max-width: 1350px;
   width: 100%;
   min-width: 0;
+  margin: 0 auto;
 }
 
 /* =========================================
@@ -105,14 +106,14 @@ main {
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   padding: 24px;
-  margin-bottom: 19px;
+  margin-bottom: 20px;
   box-shadow: var(--shadow-sm);
 }
 
 .grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 18px;
+  gap: 20px;
 }
 
 .grid .card { margin: 0; }
@@ -156,7 +157,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   outline-offset: 3px;
 }
 
-.field { margin-bottom: 15px; }
+.field { margin-bottom: 16px; }
 label { display: block; font-weight: 600; margin-bottom: 5px; color: var(--ink); }
 
 input, textarea, select {
@@ -187,10 +188,10 @@ textarea {
 .notice {
   border-left: 4px solid #d5a242;
   background: #fff7e5;
-  border-radius: 7px;
+  border-radius: 10px;
   padding: 14px 18px;
   font-size: 14px;
-  margin: 16px 0;
+  margin: 20px 0;
 }
 
 .pill {
@@ -222,7 +223,7 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  margin: 16px 0 0;
+  margin: 20px 0 0;
 }
 
 .eyebrow {
@@ -231,6 +232,7 @@ textarea {
   letter-spacing: 1px;
   color: #4267ca;
   font-weight: 700;
+  margin-bottom: 6px;
 }
 
 .good { padding: 14px; background: #eaf7ee; border-radius: 8px; color: #065f46; }
@@ -249,7 +251,7 @@ textarea {
 .footer {
   font-size: 12px;
   color: var(--muted);
-  margin-top: 25px;
+  margin-top: 32px;
 }
 
 .search { max-width: 550px; margin-bottom: 20px; }
@@ -298,7 +300,7 @@ summary {
 /* =========================================
    7. Уроки и контент (Новые стили для разделов и картинок)
    ========================================= */
-.lesson { max-width: 960px; }
+.lesson { max-width: 960px; margin: 0 auto; }
 .lesson p { line-height: 1.9; }
 
 .toc { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -408,6 +410,37 @@ summary {
   box-shadow: var(--shadow-md);
   border-color: #cbd5e1;
 }
+
+/* Блочный редактор (текст / картинка / видео) */
+.esec-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.esec-head strong { color: #2563eb; font-size: 1rem; }
+.esec-actions { display: flex; gap: 4px; }
+.esec-label { display: block; margin-bottom: 12px; }
+.esec-label span { font-size: 0.85rem; color: #64748b; font-weight: 600; display: block; margin-bottom: 5px; }
+.esec-label input { width: 100%; box-sizing: border-box; }
+.eblock-list { display: flex; flex-direction: column; gap: 10px; }
+.eblock { border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px; background: #f8fafc; }
+.eblock-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.eblock-tag { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: #315de0; background: #e9eefa; padding: 2px 8px; border-radius: 99px; }
+.eblock-actions { display: flex; gap: 4px; }
+.eblock-text { width: 100%; min-height: 90px; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font: inherit; line-height: 1.5; box-sizing: border-box; background: #fff; }
+.eblock-img { max-width: 100%; max-height: 220px; display: block; margin: 0 auto 8px; border-radius: 6px; border: 1px solid #cbd5e1; }
+.eblock-img-empty { padding: 14px; text-align: center; color: #64748b; background: #fff; border: 1px dashed #cbd5e1; border-radius: 6px; font-size: 0.85rem; margin-bottom: 8px; }
+.eblock-src, .eblock-cap { width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font: inherit; box-sizing: border-box; margin-bottom: 8px; background: #fff; }
+.eblock-hint { font-size: 0.8rem; color: #64748b; margin: -2px 0 8px; }
+.eblock-hint.ok { color: #1a7f37; }
+.eblock-hint.warn { color: #b45309; }
+.eblock-empty { color: #94a3b8; font-size: 0.85rem; padding: 8px 0; }
+.eblock-add { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+html[data-theme="dark"] .eblock { background: #182234; border-color: #33445f; }
+html[data-theme="dark"] .eblock-tag { background: #22314b; color: #8fb0ff; }
+html[data-theme="dark"] .eblock-img-empty { background: #101a2a; border-color: #33445f; color: #5d708c; }
+html[data-theme="dark"] .eblock-empty { color: #5d708c; }
+
+/* Встроенное видео в уроке */
+.video-wrap { position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; border-radius: 10px; background: #000; }
+.video-frame { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; }
+figure.card figcaption { color: var(--muted); font-size: 0.875rem; text-align: center; font-style: italic; padding: 0.5rem 0.25rem 0.25rem; }
 
 /* =========================================
    8b. Калькуляторы
@@ -1096,3 +1129,56 @@ html[data-theme="dark"] .module-checkboxes { background: #101a2a; border-color: 
 }
 .assign-dialog h2 { margin-top: 0; }
 .assign-dialog .module-checkboxes { max-height: 220px; }
+
+/* =========================================
+   Лайтбокс изображений
+   ========================================= */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  background: rgba(8, 12, 20, 0.92);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  cursor: zoom-out;
+}
+.lightbox.open { display: flex; }
+.lightbox img {
+  max-width: 100%;
+  max-height: 92vh;
+  border-radius: 6px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  cursor: default;
+  background: #fff;
+}
+.lightbox-cap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 12px;
+  text-align: center;
+  color: #e6ecf5;
+  font-size: 14px;
+  padding: 0 20px;
+  pointer-events: none;
+}
+.lightbox-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 18px;
+  border: 0;
+  cursor: pointer;
+}
+.lightbox-close:hover { background: rgba(255, 255, 255, 0.25); }
+
+@media print {
+  .lightbox { display: none !important; }
+}

@@ -238,6 +238,11 @@ button.secondary{background:#e9eefa;color:#284aa2}
       ['my_quiz_best', {}],
       ['save_my_progress', { p_slug: '01', p_percent: -1 }],
       ['save_my_quiz', { p_percent: -1 }],
+      ['my_progress_for', { p_enrollment: '00000000-0000-0000-0000-000000000000' }],
+      ['my_quiz_best_for', { p_enrollment: '00000000-0000-0000-0000-000000000000' }],
+      ['save_my_progress_for', { p_enrollment: '00000000-0000-0000-0000-000000000000', p_slug: '01', p_percent: -1 }],
+      ['save_my_quiz_for', { p_enrollment: '00000000-0000-0000-0000-000000000000', p_percent: -1 }],
+      ['reset_my_progress', { p_enrollment: '00000000-0000-0000-0000-000000000000', p_slug: '01' }],
     ]) {
       try {
         const res = await timeout(fetch(APP_CONFIG.supabaseUrl + '/rest/v1/rpc/' + fn, {

@@ -21,18 +21,45 @@
   const app = document.querySelector('#app');
   const params = new URLSearchParams(location.search);
   const mode = params.get('mode');
+  // Захватываем токен из адреса сразу, до того как Supabase сотрёт его из URL.
+  const hashParams = new URLSearchParams(location.hash.replace(/^#/, ''));
   const address = location.hash + location.search;
   // Ссылка приглашения или сброса приходит с токеном: implicit (#access_token),
   // PKCE (?code=) или OTP (?token_hash=). Ошибку Supabase тоже показываем явно.
   const hasToken = /access_token|refresh_token|error_description|type=(invite|recovery)|[?&#]code=|[?&#]token_hash=/.test(address);
-  const linkError = params.get('error_description') || new URLSearchParams(location.hash.slice(1)).get('error_description');
+  const linkError = params.get('error_description') || hashParams.get('error_description');
 
   let session = null;
   if (hasToken && !linkError) {
+    // 1. Даём Supabase время обработать токен из адреса.
     for (let i = 0; i < 16 && !session; i++) {
       const { data } = await sb.auth.getSession();
       session = data.session;
       if (!session) await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+    // 2. Резерв для implicit-флоу: вручную ставим сессию из #access_token.
+    if (!session) {
+      const access_token = hashParams.get('access_token');
+      const refresh_token = hashParams.get('refresh_token');
+      if (access_token) {
+        try {
+          const { data, error } = await sb.auth.setSession({
+            access_token,
+            refresh_token: refresh_token || '',
+          });
+          if (!error && data && data.session) session = data.session;
+        } catch (e) { /* токен не подошёл — ниже покажем ошибку */ }
+      }
+    }
+    // 3. Резерв для PKCE-флоу: обмениваем ?code= на сессию.
+    if (!session) {
+      const code = params.get('code');
+      if (code) {
+        try {
+          const { data, error } = await sb.auth.exchangeCodeForSession(code);
+          if (!error && data && data.session) session = data.session;
+        } catch (e) { /* код не подошёл */ }
+      }
     }
   }
 
@@ -131,7 +158,11 @@
     status.hidden = true;
     button.disabled = true;
     button.textContent = 'Отправляем…';
-    await sb.auth.resetPasswordForEmail(email, { redirectTo: `${APP_CONFIG.siteUrl}/reset.html` });
+    // Возвращаем пользователя на reset.html в том же окружении, где открыт сайт
+    // (localhost при локальной проверке, GitHub Pages в проде) — так ссылка не
+    // слетает на корень из-за расхождения с Site URL в панели Supabase.
+    const resetUrl = new URL('reset.html', location.href).href;
+    await sb.auth.resetPasswordForEmail(email, { redirectTo: resetUrl });
     // Ответ одинаковый, чтобы нельзя было проверить существование адреса.
     status.hidden = false;
     status.className = 'notice ok';

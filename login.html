@@ -2,16 +2,17 @@
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Вход — АРМАТУРА / PRO</title>
 <link rel="stylesheet" href="css/style.css">
-<style>
-.login{max-width:430px;margin:40px auto}.field{margin-bottom:14px}
-label{display:block;font-weight:600;margin-bottom:5px}
-input{width:100%;padding:11px;border:1px solid #bbc9de;border-radius:9px;font:inherit}
-button{width:100%;padding:12px;border:0;border-radius:9px;background:#315de0;color:#fff;font:inherit;cursor:pointer}
-.notice{border-left:4px solid #d5a242;background:#fff7e5;padding:14px 18px;margin:16px 0;font-size:14px}
-.ok{border-left-color:#16926a;background:#eaf7ee}.err{border-left-color:#c0392b;background:#fff0ed}
-small{color:#65738a}a{color:#315de0}
-</style></head>
-<body><div class="layout"><main id="app"><div class="login"><p>Загрузка…</p></div></main></div>
+<script src="js/theme.js"></script>
+</head>
+<body class="auth">
+<main>
+  <div class="auth-brand">
+    <a class="mark" href="index.html">АРМАТУРА <span>/ PRO</span></a>
+    <p>Учебная система · доступ по приглашению</p>
+  </div>
+  <div id="app"><div class="card"><p>Загрузка…</p></div></div>
+  <p class="auth-foot"><a href="index.html">← Вернуться к учебнику</a></p>
+</main>
 <script src="js/config.js"></script>
 <script src="js/vendor/supabase.js"></script>
 <script src="js/supabase-client.js"></script>
@@ -21,49 +22,104 @@ small{color:#65738a}a{color:#315de0}
   const next = new URLSearchParams(location.search).get('next') || '';
   // Разрешаем переход только внутри сайта.
   const target = /^[a-z0-9/_-]*$/i.test(next) ? next : '';
-  app.innerHTML = `<div class="login">
+
+  app.innerHTML = `<div class="card">
     <h1>Вход в учебную систему</h1>
-    <div class="card">
-      <form id="form">
-        <div class="field"><label for="email">Рабочий email</label><input id="email" type="email" required autocomplete="username"></div>
-        <div class="field"><label for="password">Пароль</label><input id="password" type="password" required autocomplete="current-password"></div>
-        <button type="submit" id="submit">Войти</button>
-      </form>
-      <p id="status" role="status"></p>
-      <p><a href="reset.html?mode=request">Забыли пароль?</a></p>
-      <p><small>Регистрация только по приглашению администратора обучения. Если вы не получили письмо — обратитесь к нему.</small></p>
-    </div>
-    <p><a href="index.html">← Вернуться к учебнику</a></p>
+    <p class="lead">Введите рабочий email и пароль, которые выдал администратор обучения.</p>
+    <form id="form">
+      <div class="field">
+        <label for="email">Рабочий email</label>
+        <input id="email" type="email" required autocomplete="username" placeholder="name@company.ru" autofocus>
+      </div>
+      <div class="field">
+        <label for="password">Пароль</label>
+        <input id="password" type="password" required autocomplete="current-password">
+      </div>
+      <p id="status" class="notice" role="status" hidden></p>
+      <button type="submit" id="submit">Войти</button>
+    </form>
+    <p class="links"><a href="reset.html?mode=request">Забыли пароль?</a><a href="admin/diag.html">Проверка доступа</a></p>
+    <p class="hint">Свободной регистрации нет: учётные записи создаёт администратор обучения.
+      Если письмо с приглашением не пришло — проверьте папку «Спам» или обратитесь к администратору.</p>
   </div>`;
 
-  document.querySelector('#form').addEventListener('submit', async (event) => {
+  const form = document.querySelector('#form');
+  const status = document.querySelector('#status');
+  const button = document.querySelector('#submit');
+
+  function show(text, kind) {
+    status.hidden = false;
+    status.className = 'notice' + (kind ? ' ' + kind : '');
+    status.textContent = text;
+  }
+
+  function hide() {
+    status.hidden = true;
+    status.textContent = '';
+  }
+
+  function message(error) {
+    const text = String((error && error.message) || '');
+    if (/invalid login credentials/i.test(text)) return 'Неверный email или пароль.';
+    if (/email not confirmed/i.test(text)) return 'Адрес не подтверждён. Откройте ссылку из письма или обратитесь к администратору.';
+    if (/failed to fetch|network|load failed/i.test(text)) return 'Нет связи с сервером. Проверьте интернет и попробуйте снова.';
+    if (/too many requests|rate limit/i.test(text)) return 'Слишком много попыток входа. Подождите несколько минут.';
+    return text || 'Не удалось войти. Попробуйте ещё раз.';
+  }
+
+  form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    const status = document.querySelector('#status');
-    const button = document.querySelector('#submit');
-    status.className = ''; status.textContent = 'Проверяем…';
+    const email = document.querySelector('#email').value.trim();
+    const password = document.querySelector('#password').value;
+    if (!email || !password) {
+      show('Заполните email и пароль.', 'err');
+      (!email ? document.querySelector('#email') : document.querySelector('#password')).focus();
+      return;
+    }
+
+    hide();
     button.disabled = true;
-    const { error } = await sb.auth.signInWithPassword({
-      email: document.querySelector('#email').value.trim(),
-      password: document.querySelector('#password').value,
-    });
-    button.disabled = false;
-    if (error) {
-      status.className = 'notice err';
-      status.textContent = /invalid login credentials/i.test(error.message)
-        ? 'Неверный email или пароль.'
-        : /email not confirmed/i.test(error.message)
-          ? 'Подтвердите адрес по ссылке из письма.'
-          : error.message;
-      return;
+    button.textContent = 'Проверяем…';
+    try {
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) { show(message(error), 'err'); return; }
+
+      const { data: userData } = await sb.auth.getUser();
+      const user = userData && userData.user;
+      // select('*') — страница не падает, если схема профиля в базе отличается.
+      const { data: profile, error: profileError } = await sb
+        .from('profiles').select('*').eq('id', user ? user.id : '').maybeSingle();
+
+      if (profileError) {
+        await sb.auth.signOut();
+        show('Вход выполнен, но профиль недоступен: ' + profileError.message, 'err');
+        return;
+      }
+      if (!profile) {
+        await sb.auth.signOut();
+        show('Профиль не найден. Обратитесь к администратору обучения — учётную запись нужно создать заново.', 'err');
+        return;
+      }
+      if (profile.is_blocked) {
+        await sb.auth.signOut();
+        show('Учётная запись заблокирована. Обратитесь к администратору обучения.', 'err');
+        return;
+      }
+      if (target.startsWith('admin') && !['admin', 'teacher'].includes(profile.role)) {
+        show('У вас нет прав администратора или наставника. Ваша роль: ' + (profile.role || 'не задана') + '.', 'err');
+        status.insertAdjacentHTML('beforeend', ' <a href="admin/diag.html">Проверка доступа</a>.');
+        return;
+      }
+
+      button.textContent = 'Вход выполнен…';
+      location.replace(target || (['admin', 'teacher'].includes(profile.role) ? 'admin/' : 'index.html'));
+    } catch (error) {
+      show(message(error), 'err');
+    } finally {
+      button.disabled = false;
+      if (button.textContent === 'Проверяем…') button.textContent = 'Войти';
     }
-    const { data: profile } = await sb.from('profiles').select('role, is_blocked').eq('id', (await sb.auth.getUser()).data.user.id).single();
-    if (profile?.is_blocked) {
-      await sb.auth.signOut();
-      status.className = 'notice err';
-      status.textContent = 'Учётная запись заблокирована. Обратитесь к администратору обучения.';
-      return;
-    }
-    location.replace(target || (profile?.role === 'admin' ? 'admin/' : 'index.html'));
   });
 })();
-</script></body></html>
+</script>
+</body></html>

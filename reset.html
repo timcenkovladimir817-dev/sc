@@ -2,79 +2,143 @@
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Пароль — АРМАТУРА / PRO</title>
 <link rel="stylesheet" href="css/style.css">
-<style>
-.login{max-width:430px;margin:40px auto}.field{margin-bottom:14px}
-label{display:block;font-weight:600;margin-bottom:5px}
-input{width:100%;padding:11px;border:1px solid #bbc9de;border-radius:9px;font:inherit}
-button{width:100%;padding:12px;border:0;border-radius:9px;background:#315de0;color:#fff;font:inherit;cursor:pointer}
-.notice{border-left:4px solid #d5a242;background:#fff7e5;padding:14px 18px;margin:16px 0;font-size:14px}
-.ok{border-left-color:#16926a;background:#eaf7ee}.err{border-left-color:#c0392b;background:#fff0ed}
-small{color:#65738a}a{color:#315de0}
-</style></head>
-<body><div class="layout"><main id="app"><div class="login"><p>Проверяем ссылку…</p></div></main></div>
+<script src="js/theme.js"></script>
+</head>
+<body class="auth">
+<main>
+  <div class="auth-brand">
+    <a class="mark" href="index.html">АРМАТУРА <span>/ PRO</span></a>
+    <p>Учебная система · пароль и приглашения</p>
+  </div>
+  <div id="app"><div class="card"><p>Проверяем ссылку…</p></div></div>
+  <p class="auth-foot"><a href="login.html">← Вернуться к входу</a></p>
+</main>
 <script src="js/config.js"></script>
 <script src="js/vendor/supabase.js"></script>
 <script src="js/supabase-client.js"></script>
 <script>
 (async () => {
   const app = document.querySelector('#app');
-  const mode = new URLSearchParams(location.search).get('mode');
-  // Ссылка приглашения или сброса пароля приходит с токеном в адресе.
-  const hasToken = /access_token|error_description|type=(invite|recovery)/.test(location.hash + location.search);
+  const params = new URLSearchParams(location.search);
+  const mode = params.get('mode');
+  const address = location.hash + location.search;
+  // Ссылка приглашения или сброса приходит с токеном: implicit (#access_token),
+  // PKCE (?code=) или OTP (?token_hash=). Ошибку Supabase тоже показываем явно.
+  const hasToken = /access_token|refresh_token|error_description|type=(invite|recovery)|[?&#]code=|[?&#]token_hash=/.test(address);
+  const linkError = params.get('error_description') || new URLSearchParams(location.hash.slice(1)).get('error_description');
+
   let session = null;
-  if (hasToken) {
-    for (let i = 0; i < 10 && !session; i++) {
+  if (hasToken && !linkError) {
+    for (let i = 0; i < 16 && !session; i++) {
       const { data } = await sb.auth.getSession();
       session = data.session;
-      if (!session) await new Promise((r) => setTimeout(r, 300));
+      if (!session) await new Promise((resolve) => setTimeout(resolve, 300));
     }
   }
 
-  if (session) {
-    app.innerHTML = `<div class="login"><h1>Задайте пароль</h1><div class="card">
-      <p>Аккаунт: <b>${esc(session.user.email || '')}</b></p>
-      <form id="set"><div class="field"><label for="p1">Новый пароль</label><input id="p1" type="password" required minlength="10" autocomplete="new-password"></div>
-      <div class="field"><label for="p2">Повторите пароль</label><input id="p2" type="password" required minlength="10" autocomplete="new-password"></div>
-      <button type="submit">Сохранить пароль</button></form>
-      <p id="status" role="status"></p>
-      <p><small>Не короче 10 символов. Используйте пароль, который не применяете на других сайтах.</small></p>
-    </div></div>`;
-    document.querySelector('#set').addEventListener('submit', async (event) => {
+  function showError(text) {
+    app.innerHTML = `<div class="card">
+      <h1>Ссылка не подошла</h1>
+      <p class="notice err">${esc(text)}</p>
+      <p class="hint">Ссылки действуют ограниченное время и срабатывают один раз.
+        Запросите новое приглашение или письмо для сброса пароля.</p>
+      <p class="links"><a href="reset.html?mode=request">Запросить новую ссылку</a><a href="login.html">Войти</a></p>
+    </div>`;
+  }
+
+  if (session && mode !== 'request') {
+    app.innerHTML = `<div class="card">
+      <h1>Задайте пароль</h1>
+      <p class="lead">Аккаунт: <b>${esc(session.user.email || '')}</b></p>
+      <form id="set">
+        <div class="field">
+          <label for="p1">Новый пароль</label>
+          <input id="p1" type="password" required minlength="10" autocomplete="new-password" autofocus>
+        </div>
+        <div class="field">
+          <label for="p2">Повторите пароль</label>
+          <input id="p2" type="password" required minlength="10" autocomplete="new-password">
+        </div>
+        <p id="status" class="notice" role="status" hidden></p>
+        <button type="submit" id="submit">Сохранить пароль</button>
+      </form>
+      <p class="hint">Не короче 10 символов. Не используйте пароль, который применяете на других сайтах.</p>
+    </div>`;
+
+    const form = document.querySelector('#set');
+    const status = document.querySelector('#status');
+    const button = document.querySelector('#submit');
+
+    function show(text, kind) {
+      status.hidden = false;
+      status.className = 'notice' + (kind ? ' ' + kind : '');
+      status.textContent = text;
+    }
+
+    form.addEventListener('submit', async (event) => {
       event.preventDefault();
-      const p1 = document.querySelector('#p1').value, p2 = document.querySelector('#p2').value;
-      const status = document.querySelector('#status');
-      status.className = ''; status.textContent = '';
-      if (p1 !== p2) { status.className = 'notice err'; status.textContent = 'Пароли не совпадают.'; return; }
-      if (p1.length < 10) { status.className = 'notice err'; status.textContent = 'Пароль короче 10 символов.'; return; }
+      const p1 = document.querySelector('#p1').value;
+      const p2 = document.querySelector('#p2').value;
+      status.hidden = true;
+      if (p1.length < 10) { show('Пароль короче 10 символов.', 'err'); return; }
+      if (p1 !== p2) { show('Пароли не совпадают.', 'err'); return; }
+
+      button.disabled = true;
+      button.textContent = 'Сохраняем…';
       const { error } = await sb.auth.updateUser({ password: p1 });
-      if (error) { status.className = 'notice err'; status.textContent = error.message; return; }
-      const { data: profile } = await sb.from('profiles').select('role').eq('id', (await sb.auth.getUser()).data.user.id).single();
-      status.className = 'notice ok';
-      status.textContent = 'Пароль сохранён. Переходим в систему…';
-      setTimeout(() => location.replace(profile?.role === 'admin' ? 'admin/' : 'index.html'), 900);
+      if (error) {
+        button.disabled = false;
+        button.textContent = 'Сохранить пароль';
+        show(String(error.message || error), 'err');
+        return;
+      }
+
+      show('Пароль сохранён. Переходим в систему…', 'ok');
+      const { data: profile } = await sb.from('profiles').select('role, is_blocked').eq('id', session.user.id).maybeSingle();
+      setTimeout(() => {
+        location.replace(profile && profile.role === 'admin' ? 'admin/' : 'index.html');
+      }, 900);
     });
     return;
   }
 
   if (hasToken) {
-    app.innerHTML = '<div class="login"><div class="notice err">Ссылка недействительна или её срок истёк. Запросите новое приглашение у администратора обучения.</div><p><a href="login.html">Войти</a></p></div>';
+    showError(linkError ? decodeURIComponent(String(linkError).replace(/\+/g, ' ')) : 'Ссылка недействительна или её срок истёк.');
     return;
   }
 
-  app.innerHTML = `<div class="login"><h1>Восстановление пароля</h1><div class="card">
-    <form id="req"><div class="field"><label for="email">Рабочий email</label><input id="email" type="email" required autocomplete="username"></div>
-    <button type="submit">Отправить ссылку</button></form>
-    <p id="status" role="status"></p>
-    <p><a href="login.html">← Вернуться к входу</a></p>
-  </div></div>`;
+  app.innerHTML = `<div class="card">
+    <h1>Восстановление пароля</h1>
+    <p class="lead">Укажите рабочий email — пришлём ссылку для задания нового пароля.</p>
+    <form id="req">
+      <div class="field">
+        <label for="email">Рабочий email</label>
+        <input id="email" type="email" required autocomplete="username" placeholder="name@company.ru" autofocus>
+      </div>
+      <p id="status" class="notice" role="status" hidden></p>
+      <button type="submit" id="submit">Отправить ссылку</button>
+    </form>
+    <p class="links"><a href="login.html">Вспомнили пароль? Войти</a></p>
+    <p class="hint">Если адрес не зарегистрирован, письмо не придёт — это нормально.
+      Учётные записи создаёт администратор обучения.</p>
+  </div>`;
+
   document.querySelector('#req').addEventListener('submit', async (event) => {
     event.preventDefault();
     const status = document.querySelector('#status');
+    const button = document.querySelector('#submit');
     const email = document.querySelector('#email').value.trim();
+    status.hidden = true;
+    button.disabled = true;
+    button.textContent = 'Отправляем…';
     await sb.auth.resetPasswordForEmail(email, { redirectTo: `${APP_CONFIG.siteUrl}/reset.html` });
     // Ответ одинаковый, чтобы нельзя было проверить существование адреса.
+    status.hidden = false;
     status.className = 'notice ok';
     status.textContent = 'Если адрес зарегистрирован, письмо со ссылкой отправлено. Проверьте папку «Спам».';
+    button.disabled = false;
+    button.textContent = 'Отправить ссылку';
   });
 })();
-</script></body></html>
+</script>
+</body></html>

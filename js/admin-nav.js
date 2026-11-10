@@ -5,6 +5,7 @@
   const pages = [
     ['index.html', 'Обзор'],
     ['users.html', 'Пользователи'],
+    ['stats.html', 'Статистика'],
     ['audit.html', 'Журнал'],
     ['import.html', 'Главы в базу'],
     ['editor.html', 'Иллюстрации'],
@@ -52,7 +53,7 @@
       : '';
     const role = profile ? profile.role : '';
     const visible = role === 'teacher'
-      ? pages.filter(([href]) => ['index.html', 'users.html', 'import.html', 'editor.html'].includes(href))
+      ? pages.filter(([href]) => ['index.html', 'users.html', 'stats.html', 'import.html', 'editor.html'].includes(href))
       : pages;
 
     mount.innerHTML = `

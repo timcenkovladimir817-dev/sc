@@ -3,11 +3,33 @@
 -- Даёт администратору и наставнику назначать не весь курс, а выбранные главы,
 -- и менять назначение существующему пользователю (не только через приглашение).
 --
+-- ВАЖНО: миграция 0006 (роль «наставник» и доступ к чужому прогрессу) должна быть
+-- применена ДО 0007 — без неё наставник не увидит прогресс учеников. Сама 0007
+-- содержит идемпотентную копию is_staff(), поэтому не падает, если 0006 пропущена.
+--
 -- Соглашение: если для назначения нет строк в enrollment_modules — значит,
 -- назначен весь курс (совместимо со старыми назначениями). Если строки есть —
 -- назначены только перечисленные главы.
 
+-- Роль «наставник» и функция is_staff() обычно создаются миграцией 0006.
+-- Дублируем их здесь идемпотентно, чтобы 0007 работала даже если 0006 пропущена.
+-- ALTER TYPE ... ADD VALUE выполняется ДО транзакции: значение enum должно быть
+-- зафиксировано, прежде чем is_staff() начнёт его использовать.
+alter type public.app_role add value if not exists 'teacher';
+
 begin;
+
+create or replace function public.is_staff() returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (
+    select 1 from public.profiles
+    where id = (select auth.uid())
+      and role in ('admin','teacher')
+      and is_blocked = false
+  );
+$$;
+revoke all on function public.is_staff() from public, anon;
+grant execute on function public.is_staff() to authenticated;
 
 -- 1. Главы, назначенные в рамках конкретного назначения (enrollment).
 create table if not exists public.enrollment_modules (

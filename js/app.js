@@ -36,6 +36,14 @@ async function initCloud(){
     }
     state.done=[...new Set([...state.done,...cloudDone])];
     for(const k in cloudNotes){if(!state.notes[k])state.notes[k]=cloudNotes[k]}
+    const {data:qb,error:qerr}=await sb.rpc('my_quiz_best');
+    const cloudBest=(!qerr&&typeof qb==='number')?qb:null;
+    if(cloudBest!=null&&cloudBest>0&&(state.best===null||cloudBest>state.best))state.best=cloudBest;
+    if(state.best!=null&&(cloudBest===null||state.best>cloudBest)){
+      sb.rpc('save_my_quiz',{p_percent:state.best})
+        .then(r=>{if(r.error)console.warn('Результат теста не сохранён в базе:',r.error.message)})
+        .catch(e=>console.warn('Результат теста не сохранён в базе:',e.message));
+    }
     save();cloudReady=true;
   }catch(e){console.warn('Не удалось загрузить облачный прогресс:',e.message)}
 }
@@ -51,6 +59,12 @@ function pushProgress(i){
 function pushNotes(i){
   clearTimeout(cloudTimer);
   cloudTimer=setTimeout(()=>pushCloud(slugFor(i),state.done.includes(i)?100:0,state.notes[i]||''),800);
+}
+function pushQuiz(pct){
+  if(!window.sb||!cloudReady)return;
+  sb.rpc('save_my_quiz',{p_percent:pct})
+    .then(r=>{if(r.error)console.warn('Результат теста не сохранён в базе:',r.error.message)})
+    .catch(e=>console.warn('Результат теста не сохранён в базе:',e.message));
 }
 const pages=[['home','Обзор'],['modules','Учебные модули'],['standards','ГОСТы'],['calc','Калькуляторы'],['test','Проверка знаний']];
 let current='home',activeModule=0;
@@ -375,7 +389,7 @@ let qi=0,score=0,locked=false;
 function startQuiz(){qi=0;score=0;showQuestion()}
 function showQuestion(){locked=false;const q=questions[qi];$('#view').innerHTML=`<div class="card"><span class="pill">Вопрос ${qi+1} из ${questions.length}</span><div class="bar"><span style="width:${qi/questions.length*100}%"></span></div><h2>${q[0]}</h2>${q[1].map((o,i)=>`<button class="option" onclick="answerQuiz(${i})">${o}</button>`).join('')}<div id="feedback" aria-live="polite"></div></div><p class="muted">Это короткая учебная самопроверка, а не аттестационный экзамен.</p>`}
 function answerQuiz(i){if(locked)return;locked=true;const q=questions[qi],ok=i===q[2];if(ok)score++;document.querySelectorAll('.option').forEach(b=>b.disabled=true);$('#feedback').innerHTML=`<div class="${ok?'good':'bad'}"><b>${ok?'Верно.':'Неверно.'}</b> ${q[3]} ${ok?'':'Правильный ответ: '+q[1][q[2]]+'.'}</div><div class="actions"><button onclick="nextQuestion()">${qi===questions.length-1?'Результат':'Далее'}</button></div>`}
-function nextQuestion(){if(!locked)return;qi++;if(qi<questions.length){showQuestion();return}const pct=Math.round(score/questions.length*100);state.best=Math.max(state.best??0,pct);save();$('#view').innerHTML=`<div class="card"><h2>Тест завершён</h2><div class="stat">${pct}%</div><p>${score} из ${questions.length} правильных ответов.</p><div class="notice">Результат не подтверждает практические навыки или допуск к работам. Разберите ошибки с наставником.</div><div class="actions"><button onclick="startQuiz()">Пройти снова</button><button class="secondary" onclick="nav('modules')">К учебным модулям</button></div></div>`}
+function nextQuestion(){if(!locked)return;qi++;if(qi<questions.length){showQuestion();return}const pct=Math.round(score/questions.length*100);state.best=Math.max(state.best??0,pct);save();pushQuiz(pct);$('#view').innerHTML=`<div class="card"><h2>Тест завершён</h2><div class="stat">${pct}%</div><p>${score} из ${questions.length} правильных ответов.</p><div class="notice">Результат не подтверждает практические навыки или допуск к работам. Разберите ошибки с наставником.</div><div class="actions"><button onclick="startQuiz()">Пройти снова</button><button class="secondary" onclick="nav('modules')">К учебным модулям</button></div></div>`}
 
 function lessonSources(i){const m=modules[i];return (m.links||[]).length?`<details><summary>Источники</summary><ul>${m.links.map(l=>`<li><a href="${escapeHTML(l[1])}" target="_blank" rel="noopener noreferrer">${escapeHTML(l[0])}</a></li>`).join('')}</ul></details>`:''}
 function figureList(list){return (list||[]).filter(x=>x&&typeof x.data==='string'&&/^(images\/|graphics\/|data:image\/(png|jpeg|webp|svg\+xml);base64,|https:\/\/)/.test(x.data)).map(x=>`<figure class="card"><img style="max-width:100%;height:auto" src="${escapeHTML(x.data)}" alt="${escapeHTML(x.caption||'')}" loading="lazy"><figcaption>${escapeHTML(x.caption||'')}</figcaption></figure>`).join('')}

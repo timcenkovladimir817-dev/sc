@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Статистика — АРМАТУРА / PRO</title>
+<link rel="stylesheet" href="../css/style.css">
+<script src="../js/theme.js"></script>
+</head>
+<body><div class="layout solo"><main id="app"><p>Проверка доступа…</p></main></div>
+<script src="../js/config.js"></script>
+<script src="../js/vendor/supabase.js"></script>
+<script src="../js/supabase-client.js"></script>
+<script src="../js/admin-nav.js"></script>
+<script>
+(async () => {
+  'use strict';
+
+  const staff = await requireStaff();
+  if (!staff) return;
+
+  const app = document.querySelector('#app');
+  const state = { profiles: [], enrollments: [], courses: [], courseModules: [], enrollmentModules: [], moduleProgress: [] };
+
+  app.innerHTML = `
+    <div id="admin-nav"></div>
+    <div class="eyebrow">Администрирование обучения</div>
+    <h1>Статистика по ученикам</h1>
+    <p class="muted">Прогресс по каждой главе, результат итогового теста и активность — отдельно по каждому ученику. Нажмите «Главы», чтобы увидеть детали по модулям.</p>
+
+    <div class="stat-grid" id="stats"></div>
+    <div class="notice" id="msg" role="status" hidden></div>
+
+    <div class="card">
+      <div class="toolbar">
+        <input id="q" type="search" placeholder="Поиск: ФИО, email, должность, подразделение" autocomplete="off">
+        <select id="filter" aria-label="Фильтр учеников">
+          <option value="all">Все ученики</option>
+          <option value="completed">Завершили</option>
+          <option value="in_progress">В работе</option>
+          <option value="not_started">Не начали</option>
+          <option value="overdue">Просрочено</option>
+          <option value="unassigned">Без курса</option>
+        </select>
+        <button type="button" class="secondary" id="export">Экспорт CSV</button>
+        <button type="button" class="secondary" id="export-modules">CSV по главам</button>
+        <button type="button" class="secondary" id="refresh">Обновить</button>
+      </div>
+      <div id="users"><p class="muted">Загрузка…</p></div>
+    </div>
+
+    <div class="card">
+      <h2>Как читать таблицу</h2>
+      <p class="muted">«Прогресс» — доля пройденных глав курса. «Тест» — лучший результат итоговой самопроверки.
+        «Начало» — первая отметка о прогрессе, «Активность» — последнее сохранение. «Время» — разница между ними.
+        «Просрочено» — срок прошёл, а курс не завершён.</p>
+    </div>
+  `;
+
+  const msg = document.querySelector('#msg');
+  const usersBox = document.querySelector('#users');
+
+  function notify(html, kind) {
+    msg.className = 'notice' + (kind ? ' ' + kind : '');
+    msg.innerHTML = html;
+    msg.hidden = false;
+    msg.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  function clearMsg() { msg.hidden = true; msg.innerHTML = ''; }
+
+  function escText(value) { return esc(value); }
+
+  const statusNames = { assigned: 'Назначено', in_progress: 'В работе', completed: 'Завершено', cancelled: 'Отменено' };
+
+  function fmtDate(value) {
+    if (!value) return '—';
+    const date = new Date(value.length === 10 ? value + 'T00:00:00' : value);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString('ru-RU');
+  }
+  function fmtDateTime(value) {
+    if (!value) return '—';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+  }
+
+  function todayStart() {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    return date;
+  }
+  function isOverdue(enrollment) {
+    if (!enrollment || !enrollment.due_date) return false;
+    if (enrollment.status === 'completed' || enrollment.status === 'cancelled') return false;
+    return new Date(enrollment.due_date + 'T00:00:00') < todayStart();
+  }
+
+  function courseName(id) {
+    const course = state.courses.find((item) => item.id === id);
+    return course ? (course.title || course.slug || 'Курс') : 'Курс';
+  }
+  function enrollmentsFor(userId) {
+    return state.enrollments.filter((item) => item.user_id === userId);
+  }
+  function primaryEnrollment(userId) {
+    const list = enrollmentsFor(userId);
+    if (!list.length) return null;
+    return list.find((item) => item.status !== 'cancelled') || list[0];
+  }
+  function modulesForCourse(courseId) {
+    return state.courseModules
+      .filter((m) => m.course_id === courseId)
+      .sort((a, b) => (Number(a.position) || 0) - (Number(b.position) || 0));
+  }
+  function assignedSlugs(enrollmentId) {
+    return new Set(state.enrollmentModules
+      .filter((m) => m.enrollment_id === enrollmentId)
+      .map((m) => m.module_slug));
+  }
+  function assignmentSummary(enrollment) {
+    if (!enrollment) return '';
+    const slugs = assignedSlugs(enrollment.id);
+    if (!slugs.size) return 'все главы';
+    const mods = modulesForCourse(enrollment.course_id).filter((m) => slugs.has(m.slug));
+    return mods.length ? mods.map((m) => m.slug).join(', ') : 'главы не выбраны';
+  }
+  function moduleProgressFor(enrollmentId) {
+    const map = new Map();
+    for (const m of state.moduleProgress) {
+      if (m.enrollment_id === enrollmentId) map.set(m.module_slug, m);
+    }
+    return map;
+  }
+  function progressBar(percent) {
+    const value = Math.max(0, Math.min(100, Number(percent) || 0));
+    return `<div class="progress-mini" title="Прогресс ${value}%"><span style="width:${value}%"></span></div>`;
+  }
+  function statusBadge(status) {
+    const cls = status === 'completed' ? 'ok' : status === 'in_progress' ? 'warn' : status === 'cancelled' ? 'muted' : '';
+    return `<span class="badge ${cls}">${escText(statusNames[status] || status || '—')}</span>`;
+  }
+
+  async function selectAll(table, order) {
+    let result = order
+      ? await sb.from(table).select('*').order(order, { ascending: false })
+      : await sb.from(table).select('*');
+    if (result.error && order) result = await sb.from(table).select('*');
+    return result;
+  }
+
+  async function load() {
+    clearMsg();
+    usersBox.innerHTML = '<p class="muted">Загрузка статистики…</p>';
+
+    const [profiles, enrollments, courses, courseModules, enrollmentModules, moduleProgress] = await Promise.all([
+      selectAll('profiles', 'created_at'),
+      selectAll('enrollments', 'created_at'),
+      selectAll('courses', null),
+      selectAll('course_modules', null),
+      selectAll('enrollment_modules', null),
+      selectAll('module_progress', null),
+    ]);
+
+    if (profiles.error) {
+      state.profiles = [];
+      usersBox.innerHTML = `<div class="notice err">
+        Не удалось прочитать профили: ${escText(profiles.error.message)}<br>
+        <small>Проверьте, что вы вошли как администратор или наставник и что применены миграции 0001, 0003 и 0006.
+        <a href="diag.html">Диагностика</a></small></div>`;
+      return;
+    }
+
+    state.profiles = profiles.data || [];
+    state.enrollments = enrollments.error ? [] : (enrollments.data || []);
+    state.courses = courses.error ? [] : (courses.data || []);
+    state.courseModules = courseModules.error ? [] : (courseModules.data || []);
+    state.enrollmentModules = enrollmentModules.error ? [] : (enrollmentModules.data || []);
+    state.moduleProgress = moduleProgress.error ? [] : (moduleProgress.data || []);
+
+    renderStats();
+    renderUsers();
+
+    if (enrollments.error) notify('Назначения курсов не загрузились: ' + escText(enrollments.error.message), 'err');
+    if (moduleProgress.error) notify('Прогресс по главам не загрузился: ' + escText(moduleProgress.error.message), 'err');
+  }
+
+  function students() {
+    return state.profiles.filter((item) => item.role === 'student');
+  }
+
+  function renderStats() {
+    const list = students();
+    const active = state.enrollments.filter((item) => item.status !== 'cancelled');
+    const completed = active.filter((item) => item.status === 'completed').length;
+    const inProgress = active.filter((item) => item.status === 'in_progress').length;
+    const avg = active.length
+      ? Math.round(active.reduce((sum, item) => sum + (Number(item.progress) || 0), 0) / active.length)
+      : 0;
+    const quiz = active.filter((item) => item.quiz_best != null);
+    const avgQuiz = quiz.length
+      ? Math.round(quiz.reduce((sum, item) => sum + (Number(item.quiz_best) || 0), 0) / quiz.length)
+      : null;
+    const overdue = active.filter(isOverdue).length;
+    const notStarted = active.filter((item) => !item.started_at).length;
+
+    const cards = [
+      ['Ученики', list.length, active.length + ' с курсом', ''],
+      ['Завершили', completed, 'курс пройден', completed ? 'ok' : ''],
+      ['В работе', inProgress, 'проходят сейчас', inProgress ? 'warn' : ''],
+      ['Средний прогресс', avg + '%', 'по активным', avg >= 80 ? 'ok' : avg >= 40 ? 'warn' : ''],
+      ['Средний тест', avgQuiz === null ? '—' : avgQuiz + '%', quiz.length ? quiz.length + ' прошли тест' : 'тест не пройден', avgQuiz === null ? '' : avgQuiz >= 80 ? 'ok' : 'warn'],
+      ['Не начали', notStarted, 'нет отметок', notStarted ? 'warn' : 'ok'],
+      ['Просрочено', overdue, 'срок прошёл', overdue ? 'bad' : 'ok'],
+    ];
+
+    document.querySelector('#stats').innerHTML = cards.map(([label, value, hint, cls]) =>
+      `<div class="stat-card ${cls}"><span class="stat-label">${escText(label)}</span>
+        <b class="stat-value">${escText(value)}</b><span class="stat-hint">${escText(hint)}</span></div>`).join('');
+  }
+
+  function fmtDuration(ms) {
+    if (ms == null || isNaN(ms) || ms < 0) return '—';
+    const sec = Math.floor(ms / 1000);
+    if (sec < 60) return 'меньше минуты';
+    const min = Math.floor(sec / 60);
+    if (min < 60) return min + ' мин';
+    const h = Math.floor(min / 60);
+    if (h < 24) return h + ' ч ' + (min % 60) + ' мин';
+    const d = Math.floor(h / 24);
+    return d + ' д ' + (h % 24) + ' ч';
+  }
+  function durationMs(enrollment) {
+    if (!enrollment) return null;
+    const start = enrollment.started_at ? new Date(enrollment.started_at) : null;
+    const end = enrollment.completed_at ? new Date(enrollment.completed_at)
+      : enrollment.last_activity_at ? new Date(enrollment.last_activity_at) : null;
+    if (!start || !end) return null;
+    return end - start;
+  }
+
+  function moduleDetail(enrollment) {
+    if (!enrollment) return '<p class="muted">Курс не назначен.</p>';
+    const assigned = assignedSlugs(enrollment.id);
+    const mods = modulesForCourse(enrollment.course_id).filter((m) => !assigned.size || assigned.has(m.slug));
+    const prog = moduleProgressFor(enrollment.id);
+    if (!mods.length) return '<p class="muted">У курса нет глав.</p>';
+    return `<div class="tablewrap"><table>
+      <thead><tr><th>Глава</th><th>Прогресс</th><th>Заметка ученика</th><th>Обновлено</th></tr></thead>
+      <tbody>${mods.map((m) => {
+        const mp = prog.get(m.slug);
+        const pct = mp ? (Number(mp.percent) || 0) : 0;
+        const notes = mp && mp.notes ? String(mp.notes) : '';
+        return `<tr>
+          <td>${escText(m.slug)} · ${escText(m.title || '')}</td>
+          <td>${progressBar(pct)} <span class="user-sub">${pct}%</span></td>
+          <td>${notes ? escText(notes.length > 200 ? notes.slice(0, 200) + '…' : notes) : '<span class="user-sub">—</span>'}</td>
+          <td>${mp ? fmtDateTime(mp.updated_at) : '—'}</td>
+        </tr>`;
+      }).join('')}</tbody></table></div>`;
+  }
+
+  function renderUsers() {
+    const query = document.querySelector('#q').value.trim().toLowerCase();
+    const filter = document.querySelector('#filter').value;
+
+    let list = students().slice();
+
+    if (filter === 'unassigned') list = list.filter((item) => !primaryEnrollment(item.id));
+    else if (filter !== 'all') {
+      list = list.filter((item) => primaryEnrollment(item.id));
+      if (filter === 'completed') list = list.filter((item) => primaryEnrollment(item.id).status === 'completed');
+      if (filter === 'in_progress') list = list.filter((item) => primaryEnrollment(item.id).status === 'in_progress');
+      if (filter === 'not_started') list = list.filter((item) => !primaryEnrollment(item.id).started_at);
+      if (filter === 'overdue') list = list.filter((item) => isOverdue(primaryEnrollment(item.id)));
+    }
+
+    if (query) {
+      list = list.filter((item) => [item.full_name, item.email, item.position, item.department]
+        .filter(Boolean).join(' ').toLowerCase().includes(query));
+    }
+
+    list.sort((a, b) => String(a.full_name || a.email || '').localeCompare(String(b.full_name || b.email || ''), 'ru'));
+
+    if (!list.length) {
+      usersBox.innerHTML = `<div class="empty">Ничего не найдено.
+        ${students().length ? 'Измените запрос или фильтр.' : 'Учеников пока нет — пригласите первого сотрудника.'}</div>`;
+      return;
+    }
+
+    usersBox.innerHTML = `<div class="tablewrap responsive-wrap"><table class="responsive">
+      <thead><tr>
+        <th>Ученик</th><th>Курс</th><th>Прогресс</th><th>Тест</th><th>Активность</th><th>Время</th><th>Срок</th>
+      </tr></thead><tbody>
+      ${list.map((user) => {
+        const enrollment = primaryEnrollment(user.id);
+        const sub = [user.position, user.department].filter(Boolean).join(' · ');
+        const detailId = user.id;
+
+        return `<tr>
+          <td data-label="Ученик">
+            <div class="user-name">${escText(user.full_name || 'Без имени')}${user.is_blocked ? ' <span class="badge bad">Заблокирован</span>' : ''}</div>
+            <div class="user-sub">${escText(user.email || '—')}</div>
+            ${sub ? `<div class="user-sub">${escText(sub)}</div>` : ''}
+          </td>
+          <td data-label="Курс">
+            ${enrollment
+              ? `<div class="user-name">${escText(courseName(enrollment.course_id))}</div>
+                 <div class="user-sub">Главы: ${escText(assignmentSummary(enrollment))}</div>`
+              : '<span class="badge muted">не назначен</span>'}
+          </td>
+          <td data-label="Прогресс">
+            ${enrollment
+              ? `${progressBar(enrollment.progress)}
+                 <div class="user-sub">${escText(enrollment.progress || 0)}% · ${statusBadge(enrollment.status)}</div>`
+              : '<span class="user-sub">—</span>'}
+          </td>
+          <td data-label="Тест">
+            ${enrollment && enrollment.quiz_best != null
+              ? `<div class="user-name">${escText(enrollment.quiz_best)}%</div><div class="user-sub">лучший результат</div>`
+              : '<span class="user-sub">не пройден</span>'}
+          </td>
+          <td data-label="Активность">
+            ${enrollment
+              ? `<div class="user-sub">Начало: ${fmtDate(enrollment.started_at)}</div>
+                 <div class="user-sub">Активность: ${fmtDateTime(enrollment.last_activity_at)}</div>`
+              : '<span class="user-sub">—</span>'}
+          </td>
+          <td data-label="Время">
+            <span class="user-sub">${fmtDuration(durationMs(enrollment))}</span>
+          </td>
+          <td data-label="Срок">
+            ${enrollment
+              ? `${fmtDate(enrollment.due_date)}${isOverdue(enrollment) ? ' <span class="badge bad">просрочено</span>' : ''}`
+              : '<span class="user-sub">—</span>'}
+            <div class="row-actions" style="margin-top:6px">
+              <button type="button" class="small secondary" data-detail="${escText(detailId)}">Главы</button>
+            </div>
+          </td>
+        </tr>
+        <tr class="detail" data-detail="${escText(detailId)}" hidden>
+          <td colspan="7">${moduleDetail(enrollment)}</td>
+        </tr>`;
+      }).join('')}
+      </tbody></table></div>
+      <p class="muted small">Показано ${list.length} из ${students().length}. «Главы» раскрывает прогресс по каждой назначенной главе и заметки ученика.</p>`;
+  }
+
+  function exportCsv() {
+    const query = document.querySelector('#q').value.trim().toLowerCase();
+    const filter = document.querySelector('#filter').value;
+    let list = students().slice();
+    if (filter === 'unassigned') list = list.filter((item) => !primaryEnrollment(item.id));
+    else if (filter !== 'all') {
+      list = list.filter((item) => primaryEnrollment(item.id));
+      if (filter === 'completed') list = list.filter((item) => primaryEnrollment(item.id).status === 'completed');
+      if (filter === 'in_progress') list = list.filter((item) => primaryEnrollment(item.id).status === 'in_progress');
+      if (filter === 'not_started') list = list.filter((item) => !primaryEnrollment(item.id).started_at);
+      if (filter === 'overdue') list = list.filter((item) => isOverdue(primaryEnrollment(item.id)));
+    }
+    if (query) list = list.filter((item) => [item.full_name, item.email, item.position, item.department].filter(Boolean).join(' ').toLowerCase().includes(query));
+    list.sort((a, b) => String(a.full_name || a.email || '').localeCompare(String(b.full_name || b.email || ''), 'ru'));
+
+    const header = ['ФИО', 'Email', 'Должность', 'Подразделение', 'Курс', 'Прогресс, %', 'Тест, %', 'Статус', 'Начало', 'Последняя активность', 'Время на курсе', 'Срок', 'Просрочено'];
+    const rows = list.map((user) => {
+      const enrollment = primaryEnrollment(user.id);
+      return [
+        user.full_name || '', user.email || '', user.position || '', user.department || '',
+        enrollment ? courseName(enrollment.course_id) : 'не назначен',
+        enrollment ? String(enrollment.progress || 0) : '',
+        enrollment && enrollment.quiz_best != null ? String(enrollment.quiz_best) : '',
+        enrollment ? (statusNames[enrollment.status] || enrollment.status || '') : '',
+        enrollment && enrollment.started_at ? fmtDate(enrollment.started_at) : '',
+        enrollment && enrollment.last_activity_at ? fmtDateTime(enrollment.last_activity_at) : '',
+        enrollment ? fmtDuration(durationMs(enrollment)) : '',
+        enrollment && enrollment.due_date ? enrollment.due_date : '',
+        enrollment && isOverdue(enrollment) ? 'да' : '',
+      ];
+    });
+    downloadCsv('students-statistics.csv', [header, ...rows]);
+    notify(`Выгружено строк: ${list.length}. Файл students-statistics.csv открывается в Excel (разделитель «;»).`, 'ok');
+  }
+
+  function exportModulesCsv() {
+    const query = document.querySelector('#q').value.trim().toLowerCase();
+    const filter = document.querySelector('#filter').value;
+    let list = students().slice();
+    if (filter === 'unassigned') list = list.filter((item) => !primaryEnrollment(item.id));
+    else if (filter !== 'all') {
+      list = list.filter((item) => primaryEnrollment(item.id));
+      if (filter === 'completed') list = list.filter((item) => primaryEnrollment(item.id).status === 'completed');
+      if (filter === 'in_progress') list = list.filter((item) => primaryEnrollment(item.id).status === 'in_progress');
+      if (filter === 'not_started') list = list.filter((item) => !primaryEnrollment(item.id).started_at);
+      if (filter === 'overdue') list = list.filter((item) => isOverdue(primaryEnrollment(item.id)));
+    }
+    if (query) list = list.filter((item) => [item.full_name, item.email, item.position, item.department].filter(Boolean).join(' ').toLowerCase().includes(query));
+    list.sort((a, b) => String(a.full_name || a.email || '').localeCompare(String(b.full_name || b.email || ''), 'ru'));
+
+    // Упорядоченный список глав (по курсу и позиции), без повторов.
+    const order = new Map();
+    for (const m of state.courseModules) {
+      const key = String(m.module_slug || m.slug);
+      if (!order.has(key)) order.set(key, m.course_id);
+    }
+    const slugs = Array.from(order.keys());
+
+    const header = ['ФИО', 'Email', 'Курс', ...slugs, 'Прогресс, %', 'Тест, %'];
+    const rows = list.map((user) => {
+      const enrollment = primaryEnrollment(user.id);
+      const cells = slugs.map((slug) => {
+        if (!enrollment) return '';
+        const assigned = assignedSlugs(enrollment.id);
+        if (assigned.size && !assigned.has(slug)) return '';
+        const mp = moduleProgressFor(enrollment.id).get(slug);
+        return mp ? String(mp.percent || 0) : '0';
+      });
+      return [
+        user.full_name || '', user.email || '',
+        enrollment ? courseName(enrollment.course_id) : 'не назначен',
+        ...cells,
+        enrollment ? String(enrollment.progress || 0) : '',
+        enrollment && enrollment.quiz_best != null ? String(enrollment.quiz_best) : '',
+      ];
+    });
+    downloadCsv('students-statistics-by-modules.csv', [header, ...rows]);
+    notify(`Выгружено строк: ${list.length}, глав: ${slugs.length}. Файл students-statistics-by-modules.csv.`, 'ok');
+  }
+
+  function downloadCsv(filename, lines) {
+    const quote = (value) => '"' + String(value ?? '').replace(/"/g, '""') + '"';
+    const csv = lines.map((row) => row.map(quote).join(';')).join('\r\n');
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  }
+
+  usersBox.addEventListener('click', (event) => {
+    const button = event.target.closest('button[data-detail]');
+    if (!button) return;
+    const row = usersBox.querySelector(`tr[data-detail="${button.dataset.detail}"]`);
+    if (!row) return;
+    row.hidden = !row.hidden;
+  });
+
+  document.querySelector('#refresh').addEventListener('click', load);
+  document.querySelector('#q').addEventListener('input', renderUsers);
+  document.querySelector('#filter').addEventListener('change', renderUsers);
+  document.querySelector('#export').addEventListener('click', exportCsv);
+  document.querySelector('#export-modules').addEventListener('click', exportModulesCsv);
+
+  await load();
+})().catch((error) => {
+  const app = document.querySelector('#app');
+  if (app) {
+    app.innerHTML = `<div class="notice err">Страница статистики не загрузилась: ${esc(error && error.message || error)}</div>
+      <p><a href="diag.html">Диагностика</a> · <a href="../index.html">Учебник</a></p>`;
+  }
+});
+</script>
+</body></html>

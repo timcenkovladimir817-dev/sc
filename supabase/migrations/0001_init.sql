@@ -234,7 +234,7 @@ begin
   if not public.is_admin() then raise exception 'Недостаточно прав'; end if;
   if p_days is null or p_days < 1 or p_days > 3650 then raise exception 'Срок ссылки от 1 до 3650 дней'; end if;
   if not exists (select 1 from public.enrollments where id = p_enrollment) then raise exception 'Назначение не найдено'; end if;
-  v_token := encode(gen_random_bytes(24), 'hex');
+  v_token := left(replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', ''), 48);
   insert into public.progress_links (enrollment_id, token, created_by, expires_at)
   values (p_enrollment, v_token, auth.uid(), now() + make_interval(days => p_days));
   return v_token;

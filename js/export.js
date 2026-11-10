@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 // ZIP without external libraries, uncompressed entries, UTF-8 names.
 function zipBytes(entries){
  const enc=new TextEncoder(),chunks=[],central=[];let offset=0;
@@ -18,8 +18,8 @@ async function exportProject(){
  const names=modules.map((_,i)=>'content/modules/'+String(i+1).padStart(2,'0')+'-module.json');
  entries.push(['content/book.json',JSON.stringify({...BOOK.manifest,version:Date.now(),modules:names},null,2)]);
  modules.forEach((m,i)=>entries.push([names[i],JSON.stringify(m,null,2)]));
- // Retain externally stored images referenced by chapters.
- const imagePaths=[...new Set(modules.flatMap(m=>(m.images||[]).map(x=>x.data)).filter(x=>/^images\/[A-Za-z0-9_./-]+$/.test(x)))];
+ // Retain external images referenced by chapters (module and section level).
+ const imagePaths=[...new Set(modules.flatMap(m=>[...(m.images||[]).map(x=>x&&x.data?x.data:(Array.isArray(x)?x[0]:'')),...(m.sections||[]).flatMap(s=>(s[2]||[]).map(x=>x&&x[0]))]).filter(x=>typeof x==='string'&&/^images\/[A-Za-z0-9_./-]+$/.test(x)))];
  for(const p of imagePaths){if(paths.includes(p))continue;const r=await fetch(p);if(!r.ok)throw Error('Не загружено изображение '+p);entries.push([p,new Uint8Array(await r.arrayBuffer())])}
  const blob=zipBytes(entries),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='armatura_project_'+dateStamp()+'.zip';a.click();setTimeout(()=>URL.revokeObjectURL(url),10000);
 }

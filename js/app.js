@@ -24,27 +24,47 @@ async function initCloud(){
   try{
     const {data:{session}}=await sb.auth.getSession();
     if(!session)return;
-    const {data,error}=await sb.rpc('my_progress');
-    if(error||!Array.isArray(data)){console.warn('Прогресс из базы не получен:',error&&error.message);return}
-    const cloudDone=[],cloudNotes={};
-    for(const row of data){
-      const i=Number(row.slug)-1;
-      if(i>=0&&i<modules.length){
-        if(Number(row.percent)>=100)cloudDone.push(i);
-        if(typeof row.notes==='string'&&row.notes.trim())cloudNotes[i]=row.notes;
+    // Сессия есть — разрешаем запись прогресса сразу, даже если чтение ниже
+    // не удастся. Иначе при сбое чтения (не применена миграция, ошибка RPC)
+    // cloudReady оставался false и прогресс никогда не уходил в базу,
+    // а у администратора статистика показывала нули.
+    cloudReady=true;
+
+    // Функция my_progress возвращает jsonb; в ряде версий клиента он приходит
+    // строкой JSON — приводим к массиву, чтобы не терять синхронизацию.
+    let {data,error}=await sb.rpc('my_progress');
+    if(typeof data==='string'){try{data=JSON.parse(data)}catch(e){data=null}}
+    if(error||!Array.isArray(data)){
+      console.warn('Прогресс из базы не получен:',error&&error.message);
+    }else{
+      const cloudDone=[],cloudNotes={};
+      for(const row of data){
+        const i=Number(row.slug)-1;
+        if(i>=0&&i<modules.length){
+          if(Number(row.percent)>=100)cloudDone.push(i);
+          if(typeof row.notes==='string'&&row.notes.trim())cloudNotes[i]=row.notes;
+        }
       }
+      state.done=[...new Set([...state.done,...cloudDone])];
+      for(const k in cloudNotes){if(!state.notes[k])state.notes[k]=cloudNotes[k]}
     }
-    state.done=[...new Set([...state.done,...cloudDone])];
-    for(const k in cloudNotes){if(!state.notes[k])state.notes[k]=cloudNotes[k]}
-    const {data:qb,error:qerr}=await sb.rpc('my_quiz_best');
-    const cloudBest=(!qerr&&typeof qb==='number')?qb:null;
+
+    let {data:qb,error:qerr}=await sb.rpc('my_quiz_best');
+    if(typeof qb==='string'){qb=Number(qb)}
+    const cloudBest=(!qerr&&typeof qb==='number'&&!isNaN(qb))?qb:null;
     if(cloudBest!=null&&cloudBest>0&&(state.best===null||cloudBest>state.best))state.best=cloudBest;
     if(state.best!=null&&(cloudBest===null||state.best>cloudBest)){
       sb.rpc('save_my_quiz',{p_percent:state.best})
         .then(r=>{if(r.error)console.warn('Результат теста не сохранён в базе:',r.error.message)})
         .catch(e=>console.warn('Результат теста не сохранён в базе:',e.message));
     }
-    save();cloudReady=true;
+
+    // Отправляем в облако локально пройденные главы, которых могло не быть в базе
+    // (например, до исправления синхронизации). save_my_progress только повышает
+    // процент, поэтому повторная отправка безопасна.
+    for(const i of state.done){pushCloud(slugFor(i),100,state.notes[i]||'')}
+
+    save();
   }catch(e){console.warn('Не удалось загрузить облачный прогресс:',e.message)}
 }
 function pushCloud(slug,percent,notes){

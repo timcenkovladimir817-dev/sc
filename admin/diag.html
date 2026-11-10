@@ -266,12 +266,20 @@ button.secondary{background:#e9eefa;color:#284aa2}
       }
     }
 
-    // 7. Хранилище
+    // 7. Хранилище. list — это POST, а не GET; иначе получим 404/405 даже при
+    // существующем бакете. Пустой список объектов тоже означает «бакет есть».
     say('Проверяю хранилище…');
     try {
-      const r = await rest('../../storage/v1/object/list/course-images', token);
-      row('Бакет course-images', r.status === 200 ? 'доступен' : 'HTTP ' + r.status + ': ' + JSON.stringify(r.data).slice(0, 200),
-        r.status === 200 ? 'ok' : 'bad');
+      const res = await timeout(fetch(APP_CONFIG.supabaseUrl + '/storage/v1/object/list/course-images', {
+        method: 'POST',
+        headers: { apikey: APP_CONFIG.supabaseAnonKey, Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prefix: '', limit: 1, offset: 0, sortBy: { column: 'name', order: 'asc' } }),
+      }), 8000, 'storage list');
+      const text = await res.text();
+      const notFound = /Bucket not found|NoSuchBucket/i.test(text);
+      row('Бакет course-images',
+        res.status === 200 ? 'доступен' : notFound ? 'не создан — Storage → New bucket «course-images» (Public)' : 'HTTP ' + res.status + ': ' + text.slice(0, 200),
+        res.status === 200 ? 'ok' : 'bad');
     } catch (e) {
       row('Бакет course-images', 'ошибка: ' + e.message, 'bad');
     }

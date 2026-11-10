@@ -21,11 +21,13 @@
 | `supabase/migrations/0010_kma_modules.sql` | Главы 17–20 по материалам презентаций: присоединения, опросный лист, классификация, приводы |
 | `supabase/migrations/0011_accept_invitation_on_signin.sql` | Приглашение помечается «принято» после первого входа (чинит «Ожидает входа») |
 | `supabase/migrations/0012_enrollment_scoped_progress.sql` | Прогресс по конкретному назначению (исправляет «один курс»), сброс отметки «изучено» в облаке |
+| `supabase/migrations/0013_harden_module_progress.sql` | Закрывает прямую запись прогресса в обход RPC (запись только через функции) |
 | `supabase/bootstrap-admin.sql` | Первый администратор (выполняется один раз вручную) |
 | `supabase/functions/invite-user` | Приглашение, Bitrix24, письмо, ссылка на прогресс |
 | `supabase/functions/resend-invite` | Повторное письмо для непринятого приглашения |
 | `supabase/functions/block-user` | Блокировка и разблокировка входа |
 | `supabase/functions/send-reminders` | Напоминания о сроках обучения по email |
+| `supabase/functions/upload-image` | Загрузка иллюстрации в bucket `editor-images`, возврат публичной ссылки |
 | `admin/index.html` | Обзор, статистика, приглашение сотрудника |
 | `admin/users.html` | Пользователи, роли, блокировка, сброс пароля, приглашения, CSV, напоминания |
 | `admin/stats.html` | Статистика по каждому ученику: главы, тест, активность, время, просрочка, экспорт CSV |
@@ -75,16 +77,18 @@ on conflict (id) do update set role = 'admin', is_blocked = false;
 0010_kma_modules.sql
 0011_accept_invitation_on_signin.sql
 0012_enrollment_scoped_progress.sql
+0013_harden_module_progress.sql
 ```
 
 Если таблицы и функции уже есть, выполните `0004_admin_tools.sql`, `0005_progress_sync.sql`,
 `0006_staff_access.sql`, `0007_module_assignment.sql`, `0008_student_statistics.sql`,
-`0009_fix_progress_link.sql`, `0010_kma_modules.sql`, `0011_accept_invitation_on_signin.sql`
-и `0012_enrollment_scoped_progress.sql`:
+`0009_fix_progress_link.sql`, `0010_kma_modules.sql`, `0011_accept_invitation_on_signin.sql`,
+`0012_enrollment_scoped_progress.sql` и `0013_harden_module_progress.sql`:
 они добавляют кнопки управления, синхронизацию прогресса, доступ наставника, назначение глав,
 статистику по ученикам, исправляют выдачу ссылок на прогресс (без зависимости от pgcrypto),
-регистрируют главы 17–20, помечают приглашения принятыми после первого входа и привязывают
-прогресс к конкретному назначению (важно при повторном назначении или нескольких курсах).
+регистрируют главы 17–20, помечают приглашения принятыми после первого входа, привязывают
+прогресс к конкретному назначению (важно при повторном назначении или нескольких курсах)
+и закрывают прямую запись прогресса в обход RPC.
 
 ## 3. Настройки Authentication
 
@@ -140,6 +144,7 @@ supabase functions deploy invite-user --no-verify-jwt
 supabase functions deploy resend-invite --no-verify-jwt
 supabase functions deploy block-user --no-verify-jwt
 supabase functions deploy send-reminders --no-verify-jwt
+supabase functions deploy upload-image --no-verify-jwt
 ```
 
 `--no-verify-jwt` нужен потому, что функция сама проверяет токен и роль администратора
@@ -149,6 +154,26 @@ supabase functions deploy send-reminders --no-verify-jwt
 
 Проверка без входа: запрос к функции должен вернуть `401 {"ok":false,"error":"Нет авторизации"}`.
 Если возвращается `404`, функция не развёрнута.
+
+## 5.1 Хранилище изображений (для `upload-image`)
+
+Функция `upload-image` кладёт файлы в bucket Supabase Storage и возвращает публичную ссылку.
+Создайте публичный bucket один раз:
+
+1. Supabase → **Storage → New bucket**, имя `editor-images`, включите **Public bucket**.
+   Либо в SQL Editor:
+   ```sql
+   insert into storage.buckets (id, name, public)
+   values ('editor-images', 'editor-images', true)
+   on conflict (id) do update set public = true;
+   ```
+2. Bucket должен быть **public**, иначе ссылка `getPublicUrl` не откроется ученикам и
+   на странице прогресса. Внутри `editor-images` права на чтение не ограничиваются —
+   картинки курса не секретные.
+
+Изображение загружается только администратором и наставником (проверка роли в функции),
+размер — до 3 МБ, форматы PNG/JPEG/WebP. Ссылка сохраняется в JSON главы, поэтому
+localStorage браузера не переполняется.
 
 ## 6. Bitrix24
 
